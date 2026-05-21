@@ -297,5 +297,68 @@ def bench_logic(proxy_url: str, vanilla_url: str, report: str, model: str, keep_
     click.echo(f"wrote {report} and {raw}")
 
 
+@main.command(name="bench-heavy")
+@click.option("--proxy-url", default="http://127.0.0.1:8787")
+@click.option("--vanilla-url", default="https://api.anthropic.com")
+@click.option("--report", default="bench-heavy-report.md")
+@click.option("--model", default="claude-haiku-4-5-20251001")
+@click.option("--keep-last-n", default=12,
+              help="vanilla mode tail-keep when simulating compaction")
+def bench_heavy(proxy_url: str, vanilla_url: str, report: str, model: str, keep_last_n: int):
+    """Run the 200-turn heavy stress bench against live Anthropic."""
+    import hashlib
+    import json
+    import os
+    import uuid
+
+    from spillover.bench.heavy_stress import (
+        build_heavy_history,
+        render_report,
+        run_spillover_full,
+        run_vanilla_truncated,
+    )
+
+    auth = os.environ.get("ANTHROPIC_API_KEY")
+    if auth and not auth.startswith("Bearer "):
+        auth = f"Bearer {auth}"
+    if not auth:
+        cred_path = Path.home() / ".claude" / ".credentials.json"
+        if cred_path.exists():
+            data = json.loads(cred_path.read_text(encoding="utf-8"))
+            tok = data.get("claudeAiOauth", {}).get("accessToken")
+            if tok:
+                auth = f"Bearer {tok}"
+    if not auth:
+        click.echo("No auth available.", err=True)
+        raise SystemExit(2)
+
+    history, anchors = build_heavy_history()
+    chars = sum(len(t["content"]) for t in history)
+    click.echo(f"history: {len(history)} turns, ~{chars} chars")
+    click.echo("anchors at turns 5, 50, 100, 150")
+    click.echo(f"vanilla keep-last-n={keep_last_n}")
+
+    pid = hashlib.sha1(uuid.uuid4().bytes).hexdigest()
+    proxy_with_proj = f"{proxy_url.rstrip('/')}/p/{pid}"
+    click.echo(f"project: {pid}")
+
+    click.echo("-> vanilla_truncated")
+    v = run_vanilla_truncated(history, vanilla_url, auth, model, keep_last_n)
+    click.echo(f"   {len(v.anchors_hit)}/4 anchors hit, {v.latency_ms}ms, {v.input_tokens} in tokens")  # noqa: E501
+
+    click.echo("-> spillover (full 200 turns)")
+    s = run_spillover_full(history, proxy_with_proj, auth, model)
+    click.echo(f"   {len(s.anchors_hit)}/4 anchors hit, {s.latency_ms}ms, {s.input_tokens} visible / {s.real_input_tokens} real")  # noqa: E501
+
+    results = [v, s]
+    Path(report).write_text(render_report(results), encoding="utf-8")
+    from dataclasses import asdict
+    raw = Path(report).with_suffix(".jsonl")
+    with raw.open("w", encoding="utf-8") as f:
+        for r in results:
+            f.write(json.dumps(asdict(r)) + "\n")
+    click.echo(f"wrote {report} and {raw}")
+
+
 if __name__ == "__main__":
     main()
