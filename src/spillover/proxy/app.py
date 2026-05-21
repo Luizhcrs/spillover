@@ -26,6 +26,7 @@ from spillover.proxy.retry import with_retry
 from spillover.retriever.budget import trim_to_budget
 from spillover.retriever.fusion import rrf_fuse
 from spillover.retriever.graph import graph_walk
+from spillover.retriever.lexical import bm25_topk
 from spillover.retriever.render import render_ltm_block
 from spillover.retriever.vector import vector_topk
 from spillover.storage.kuzu import open_project_kuzu
@@ -146,7 +147,12 @@ def _retrieve_ltm_block(
             except Exception:
                 _log.exception("graph walk failed project=%s", project_id)
 
-        fused = rrf_fuse(v_hits, g_hits)[: config.retriever_topk]
+        b_hits = bm25_topk(db, query_text, k=config.retriever_bm25_k)
+        fused = rrf_fuse(v_hits, g_hits, b_hits)[: config.retriever_topk]
+        from spillover.metrics.registry import retriever_hits_total
+        retriever_hits_total.labels(project=project_id, source="vector").inc(len(v_hits))
+        retriever_hits_total.labels(project=project_id, source="graph").inc(len(g_hits))
+        retriever_hits_total.labels(project=project_id, source="bm25").inc(len(b_hits))
         if inbound_payload is not None:
             budget = _ltm_budget_for(config, inbound_payload)
         else:

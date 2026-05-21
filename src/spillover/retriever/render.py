@@ -37,8 +37,10 @@ def render_ltm_block(db: sqlite3.Connection, hits: list[Hit]) -> str:
         return ""
     return (
         "<spillover-ltm>\n"
-        "The following are relevant past episodes retrieved from long-term memory.\n"
-        "They are NOT part of the active conversation.\n\n"
+        "Below are excerpts of YOUR OWN past statements and decisions, retrieved\n"
+        "from a long-term memory store keyed on this project. Quote from this\n"
+        "block whenever it answers the user's question directly. Treat them as\n"
+        "facts you established earlier in this project.\n\n"
         + "\n\n".join(sections)
         + "\n</spillover-ltm>"
     )

@@ -33,6 +33,7 @@ def test_render_wraps_in_block(tmp_path):
         out = render_ltm_block(db, [Hit(eid, 1.0)])
         assert out.startswith("<spillover-ltm>")
         assert out.endswith("</spillover-ltm>")
+        assert "Below are excerpts of YOUR OWN past statements" in out
         assert "hello world" in out
         assert f'id="{eid}"' in out
     finally:
