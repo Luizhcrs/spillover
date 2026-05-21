@@ -55,6 +55,27 @@ def select_for_eviction(
     tokens_to_free: int,
     recent_buffer: int = 4,
 ) -> SelectionResult:
+    """Pick which active turns to evict to meet a token budget.
+
+    Implements the 3-pass policy from spec §5:
+      - Pass 1: FIFO over non-priority, non-pinned, non-system, non-recent turns.
+      - Pass 2 (fallback if Pass 1 short): drain remaining non-priority first,
+        then priority turns oldest-first. Still excludes system, pinned, recent.
+      - Pass 3 (fallback if Pass 2 short): return whatever Pass 2 freed and
+        set ``budget_pressure=True`` so the caller can shrink the LTM injection
+        budget for this turn and emit a budget-pressure event.
+
+    Args:
+        turns: active conversation turns in chronological order.
+        tokens_to_free: number of tokens to evict in this call (typically equal
+            to the new user+assistant tokens entering this turn for 1:1 balance).
+        recent_buffer: number of most-recent turns to protect (default 4).
+
+    Returns:
+        SelectionResult. ``evicted_indexes`` are positions in ``turns``.
+        ``pass_used`` is 0 if no work was attempted (``tokens_to_free <= 0``),
+        1, 2, or 3 otherwise. ``budget_pressure`` is True only when Pass 3 fires.
+    """
     if tokens_to_free <= 0:
         return SelectionResult()
 
@@ -79,14 +100,11 @@ def select_for_eviction(
                 evicted_indexes=evicted, tokens_freed=freed, pass_used=2
             )
 
-    if freed >= tokens_to_free:
-        return SelectionResult(
-            evicted_indexes=evicted, tokens_freed=freed, pass_used=2
-        )
-
+    # Pass 3: Pass 2 ran but did not free enough. Keep whatever it freed and
+    # signal budget pressure so the caller can compensate.
     return SelectionResult(
-        evicted_indexes=[],
-        tokens_freed=0,
+        evicted_indexes=evicted,
+        tokens_freed=freed,
         pass_used=3,
         budget_pressure=True,
     )

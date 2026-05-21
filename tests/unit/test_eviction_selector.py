@@ -89,3 +89,22 @@ def test_token_balance_invariant_over_50_turns():
     turns = [_t(i, 100) for i in range(50)]
     result = select_for_eviction(turns, tokens_to_free=350, recent_buffer=4)
     assert result.tokens_freed >= 350
+
+
+def test_pass3_keeps_partial_pass2_work_and_signals_pressure():
+    """If Pass 2 frees something but not enough, Pass 3 keeps the partial work
+    and sets budget_pressure=True."""
+    turns = [
+        _t(0, 100, is_system=True),
+        _t(1, 100, pinned=True),
+        _t(2, 50),  # only 50 tokens evictable in passes 1+2
+        _t(3, 50),  # recent
+        _t(4, 50),  # recent
+        _t(5, 50),  # recent
+        _t(6, 50),  # recent
+    ]
+    result = select_for_eviction(turns, tokens_to_free=200, recent_buffer=4)
+    assert result.pass_used == 3
+    assert result.budget_pressure is True
+    assert result.evicted_indexes == [2]
+    assert result.tokens_freed == 50
