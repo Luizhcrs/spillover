@@ -1,0 +1,6 @@
+{"query": "where did we decide to use SQLite over Postgres", "expected_episode_id": "REPLACE_ME_WITH_REAL_EPISODE_ID", "notes": "decision turn"}
+{"query": "what was the auth bug at middleware.py:42", "expected_episode_id": "REPLACE_ME_WITH_REAL_EPISODE_ID", "notes": "diagnosed jwt expiry comparison"}
+{"query": "what does ADR-014 cover", "expected_episode_id": "REPLACE_ME_WITH_REAL_EPISODE_ID"}
+{"query": "what was the coolify deploy pattern with traefik", "expected_episode_id": "REPLACE_ME_WITH_REAL_EPISODE_ID"}
+{"query": "what is erica's insulin regimen", "expected_episode_id": "REPLACE_ME_WITH_REAL_EPISODE_ID"}
+{"query": "qual era o bug do middleware auth", "expected_episode_id": "REPLACE_ME_WITH_REAL_EPISODE_ID", "notes": "PT-BR query, same content"}
