@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import time
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
 import httpx
 
@@ -24,7 +22,7 @@ class LongConvResult:
 @dataclass
 class LongConvScenario:
     id: str
-    pre_turns: list[dict]   # background work, no anchors
+    pre_turns: list[dict]    # background work, no anchors
     anchor_turns: list[dict]  # turns containing the facts we want to recover
     filler_turns: list[dict]  # post-anchor work that pushes anchors out
     question: str
@@ -35,17 +33,55 @@ def make_scenario_db_choice() -> LongConvScenario:
     """Scenario: 80 turns of work, db choice fact at turn 5, asked at end."""
     pre = []
     anchor = [
-        {"role": "user", "content": "We're at the storage layer decision point. Local-only deployment, max few hundred GB, single user. Postgres or SQLite?"},
-        {"role": "assistant", "content": "Given local-only + few hundred GB ceiling + zero-infra requirement, SQLite is the right call. Postgres adds a daemon + auth + connection pooling we don't need. Decision: SQLite. Reason: local-only + zero-infra + scale-fits."},
+        {
+            "role": "user",
+            "content": (
+                "We're at the storage layer decision point. "
+                "Local-only deployment, max few hundred GB, single user. "
+                "Postgres or SQLite?"
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": (
+                "Given local-only + few hundred GB ceiling + zero-infra requirement, "
+                "SQLite is the right call. Postgres adds a daemon + auth + connection "
+                "pooling we don't need. Decision: SQLite. "
+                "Reason: local-only + zero-infra + scale-fits."
+            ),
+        },
     ]
     filler = []
     # Fill to 80 turns total
     for i in range(38):
-        pre.append({"role": "user", "content": f"sub-task {i:02d}: list files in src/, check imports, look for circular dependencies"})
-        pre.append({"role": "assistant", "content": f"checked src/ at iteration {i:02d}, no circular imports found, structure clean"})
+        pre.append({
+            "role": "user",
+            "content": (
+                f"sub-task {i:02d}: list files in src/, "
+                "check imports, look for circular dependencies"
+            ),
+        })
+        pre.append({
+            "role": "assistant",
+            "content": (
+                f"checked src/ at iteration {i:02d}, "
+                "no circular imports found, structure clean"
+            ),
+        })
     for i in range(20):
-        filler.append({"role": "user", "content": f"unrelated work {i:02d}: refactor the http client to use httpx instead of requests"})
-        filler.append({"role": "assistant", "content": f"refactor pass {i:02d} done, httpx 0.27 wired, sync calls migrated"})
+        filler.append({
+            "role": "user",
+            "content": (
+                f"unrelated work {i:02d}: "
+                "refactor the http client to use httpx instead of requests"
+            ),
+        })
+        filler.append({
+            "role": "assistant",
+            "content": (
+                f"refactor pass {i:02d} done, httpx 0.27 wired, sync calls migrated"
+            ),
+        })
     return LongConvScenario(
         id="db_choice_long",
         pre_turns=pre,
@@ -59,16 +95,51 @@ def make_scenario_db_choice() -> LongConvScenario:
 def make_scenario_auth_bug() -> LongConvScenario:
     pre = []
     anchor = [
-        {"role": "user", "content": "Bug in auth: tokens that expire AT THE EXACT MOMENT of the request are accepted instead of rejected. The off-by-one is in middleware.py line 42 — the comparison uses `<` instead of `<=`."},
-        {"role": "assistant", "content": "Confirmed: auth bug at middleware.py:42. Operator is `<` when it should be `<=`. Classic off-by-one on the jwt expiry boundary. Tests reproduce."},
+        {
+            "role": "user",
+            "content": (
+                "Bug in auth: tokens that expire AT THE EXACT MOMENT of the request "
+                "are accepted instead of rejected. The off-by-one is in middleware.py "
+                "line 42 — the comparison uses `<` instead of `<=`."
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": (
+                "Confirmed: auth bug at middleware.py:42. "
+                "Operator is `<` when it should be `<=`. "
+                "Classic off-by-one on the jwt expiry boundary. Tests reproduce."
+            ),
+        },
     ]
     filler = []
     for i in range(38):
-        pre.append({"role": "user", "content": f"investigate logging config item {i:02d}, verify formatter, check log levels"})
-        pre.append({"role": "assistant", "content": f"logging config item {i:02d}: structured json, level INFO, formatter consistent"})
+        pre.append({
+            "role": "user",
+            "content": (
+                f"investigate logging config item {i:02d}, "
+                "verify formatter, check log levels"
+            ),
+        })
+        pre.append({
+            "role": "assistant",
+            "content": (
+                f"logging config item {i:02d}: "
+                "structured json, level INFO, formatter consistent"
+            ),
+        })
     for i in range(20):
-        filler.append({"role": "user", "content": f"docs cleanup task {i:02d}: rewrite the section on configuration env vars"})
-        filler.append({"role": "assistant", "content": f"docs section {i:02d} rewritten, table format applied"})
+        filler.append({
+            "role": "user",
+            "content": (
+                f"docs cleanup task {i:02d}: "
+                "rewrite the section on configuration env vars"
+            ),
+        })
+        filler.append({
+            "role": "assistant",
+            "content": f"docs section {i:02d} rewritten, table format applied",
+        })
     return LongConvScenario(
         id="auth_bug_long",
         pre_turns=pre,
@@ -97,7 +168,12 @@ def _extract_text(resp: dict) -> str:
     )
 
 
-def _call(base_url: str, auth: str, payload: dict, extra_headers: dict | None = None) -> tuple[int, dict]:
+def _call(
+    base_url: str,
+    auth: str,
+    payload: dict,
+    extra_headers: dict | None = None,
+) -> tuple[int, dict]:
     headers = {
         "Authorization": auth,
         "anthropic-version": "2023-06-01",
@@ -123,7 +199,10 @@ def run_vanilla_truncated(
     kept = all_turns[-keep_last_n:] + [{"role": "user", "content": scenario.question}]
     t0 = time.time()
     try:
-        _, resp = _call(base_url, auth, {"model": model, "max_tokens": 300, "messages": kept})
+        _, resp = _call(
+            base_url, auth,
+            {"model": model, "max_tokens": 300, "messages": kept},
+        )
         text = _extract_text(resp)
         usage = resp.get("usage", {})
         hits, misses = _check_anchors(text, scenario.expected_anchors)
@@ -179,28 +258,36 @@ def run_spillover(
 
 
 def render_report(results: list[LongConvResult]) -> str:
-    by_mode: dict[str, list[LongConvResult]] = {"vanilla_truncated": [], "spillover": []}
+    by_mode: dict[str, list[LongConvResult]] = {
+        "vanilla_truncated": [],
+        "spillover": [],
+    }
     for r in results:
         by_mode[r.mode].append(r)
 
-    def _full_hit(rs):
+    def _full_hit(rs: list[LongConvResult]) -> int:
         return sum(1 for r in rs if not r.anchors_missed) if rs else 0
 
-    lines = ["# Long-conversation bench", "", "## summary", "", "| metric | vanilla_truncated | spillover |", "|---|---:|---:|"]
     v = by_mode["vanilla_truncated"]
     s = by_mode["spillover"]
-    lines.append(f"| scenarios w/ all anchors hit | {_full_hit(v)}/{len(v)} | {_full_hit(s)}/{len(s)} |")
-    lines.append(f"| total input_tokens | {sum(r.input_tokens for r in v)} | {sum(r.input_tokens for r in s)} |")
-    lines.append(f"| total output_tokens | {sum(r.output_tokens for r in v)} | {sum(r.output_tokens for r in s)} |")
-    lines.append(f"| total errors | {sum(1 for r in v if r.error)} | {sum(1 for r in s if r.error)} |")
-
+    lines = [
+        "# Long-conversation bench", "", "## summary", "",
+        "| metric | vanilla_truncated | spillover |",
+        "|---|---:|---:|",
+        f"| scenarios w/ all anchors hit | {_full_hit(v)}/{len(v)} | {_full_hit(s)}/{len(s)} |",
+        f"| total input_tokens | {sum(r.input_tokens for r in v)} | {sum(r.input_tokens for r in s)} |",  # noqa: E501
+        f"| total output_tokens | {sum(r.output_tokens for r in v)} | {sum(r.output_tokens for r in s)} |",  # noqa: E501
+        f"| total errors | {sum(1 for r in v if r.error)} | {sum(1 for r in s if r.error)} |",
+    ]
     lines.append("\n## per-scenario\n")
     lines.append("| scenario | mode | hits | misses | input | output | latency_ms |")
     lines.append("|---|---|---|---|---:|---:|---:|")
     for r in results:
         hits = ",".join(r.anchors_hit) or "-"
         misses = ",".join(r.anchors_missed) or "-"
-        lines.append(
-            f"| {r.scenario_id} | {r.mode} | {hits} | {misses} | {r.input_tokens} | {r.output_tokens} | {r.latency_ms} |"
+        row = (
+            f"| {r.scenario_id} | {r.mode} | {hits} | {misses} "
+            f"| {r.input_tokens} | {r.output_tokens} | {r.latency_ms} |"
         )
+        lines.append(row)
     return "\n".join(lines) + "\n"

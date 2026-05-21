@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch
 
 from spillover.proxy.app import _inject_ltm

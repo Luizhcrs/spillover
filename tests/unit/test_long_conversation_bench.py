@@ -1,7 +1,6 @@
 from spillover.bench.long_conversation import (
     LongConvResult,
     _check_anchors,
-    _extract_text,
     all_scenarios,
     render_report,
 )
@@ -19,7 +18,10 @@ def test_all_scenarios_have_anchors_and_question():
 
 
 def test_check_anchors_case_insensitive():
-    hits, misses = _check_anchors("we picked SQLite for the local case", ["sqlite", "local", "postgres"])
+    hits, misses = _check_anchors(
+        "we picked SQLite for the local case",
+        ["sqlite", "local", "postgres"],
+    )
     assert hits == ["sqlite", "local"]
     assert misses == ["postgres"]
 

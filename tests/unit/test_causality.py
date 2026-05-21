@@ -1,5 +1,5 @@
 from spillover.retriever.causal import causality_chain
-from spillover.storage.kuzu import open_project_kuzu, clear_kuzu_cache
+from spillover.storage.kuzu import clear_kuzu_cache, open_project_kuzu
 
 
 def test_causality_chain_forward_one_hop(tmp_path):

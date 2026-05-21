@@ -197,7 +197,10 @@ def bench_long(proxy_url: str, vanilla_url: str, report: str, model: str):
     import uuid
 
     from spillover.bench.long_conversation import (
-        all_scenarios, render_report, run_spillover, run_vanilla_truncated,
+        all_scenarios,
+        render_report,
+        run_spillover,
+        run_vanilla_truncated,
     )
 
     auth = os.environ.get("ANTHROPIC_API_KEY")
@@ -247,7 +250,10 @@ def bench_logic(proxy_url: str, vanilla_url: str, report: str, model: str, keep_
     import uuid
 
     from spillover.bench.landing_page_scenario import (
-        LANDING_PAGE_DETAILS, build_landing_page_history, render_logic_report, run_logic_check,
+        LANDING_PAGE_DETAILS,
+        build_landing_page_history,
+        render_logic_report,
+        run_logic_check,
     )
 
     auth = os.environ.get("ANTHROPIC_API_KEY")
