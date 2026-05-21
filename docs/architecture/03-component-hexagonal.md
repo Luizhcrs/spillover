@@ -13,7 +13,7 @@ graph TB
         http["Rotas FastAPI<br/>POST /v1/messages<br/>POST /v1/chat/completions<br/>GET /metrics<br/>GET /health"]:::inbound
         cli["CLI Click<br/>up / stats / query /<br/>bench / bench-long /<br/>bench-logic / bench-heavy"]:::inbound
         sched["Schedulers<br/>FacetWorker (consumidor de fila)<br/>DecayScheduler (cron 6h)"]:::inbound
-        mid["ProjectIdMiddleware<br/>resolve /p/&lt;id&gt; OU<br/>header X-Project OU<br/>env SPILLOVER_PROJECT_ID"]:::inbound
+        mid["ProjectIdMiddleware<br/>resolve path prefix p/id OU<br/>header X-Project OU<br/>env SPILLOVER_PROJECT_ID"]:::inbound
     end
 
     subgraph "APLICACAO (casos de uso)"
@@ -25,16 +25,16 @@ graph TB
     end
 
     subgraph "DOMINIO (puro)"
-        entities["<b>Entidades</b><br/>Episode, Turn, Hit,<br/>Conversation,<br/>ConversationTurn,<br/>SeenTurn, FacetEvent"]:::domain
-        values["<b>Value Objects</b><br/>MemoryType, BudgetProfile,<br/>TokenPlan, SelectionResult,<br/>Entity, Decision, CodeRef"]:::domain
-        policies["<b>Policies (funcoes puras)</b><br/>select_for_eviction (3-pass)<br/>rrf_fuse + type weights<br/>formula importance decay<br/>classify (5-way)<br/>extract_entities/decisions/<br/>code_refs/open_tasks<br/>diff de compaction<br/>usage_rewrite<br/>sse_rewrite<br/>should_intercept_request"]:::domain
+        entities["ENTIDADES<br/>Episode, Turn, Hit,<br/>Conversation,<br/>ConversationTurn,<br/>SeenTurn, FacetEvent"]:::domain
+        values["VALUE OBJECTS<br/>MemoryType, BudgetProfile,<br/>TokenPlan, SelectionResult,<br/>Entity, Decision, CodeRef"]:::domain
+        policies["POLICIES funcoes puras<br/>select_for_eviction 3-pass<br/>rrf_fuse + type weights<br/>formula importance decay<br/>classify 5-way<br/>extract_entities/decisions/<br/>code_refs/open_tasks<br/>diff de compaction<br/>usage_rewrite<br/>sse_rewrite<br/>should_intercept_request"]:::domain
     end
 
     subgraph "OUTBOUND ADAPTERS (servem)"
         repo[("EpisodeRepo<br/>SQLite<br/>tabela episodes")]:::outbound
         seen[("SeenTurnRepo<br/>SQLite<br/>tabela seen_turns")]:::outbound
         vec[("VectorIndex<br/>sqlite-vec<br/>vec_episodes")]:::outbound
-        fts[("LexicalIndex<br/>SQLite FTS5<br/>episodes_fts<br/>tokenchars ./_-:")]:::outbound
+        fts[("LexicalIndex<br/>SQLite FTS5<br/>episodes_fts<br/>tokenchars dot slash underscore dash colon")]:::outbound
         graph[("GraphIndex<br/>Kuzu<br/>cache LRU 32")]:::outbound
         embed["Embedder<br/>fastembed<br/>nomic-embed-text-v1.5-Q"]:::outbound
         anth["AnthropicClient<br/>adapters/anthropic.py<br/>+ httpx + retry"]:::outbound

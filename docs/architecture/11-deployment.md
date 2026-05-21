@@ -14,9 +14,9 @@ graph TB
         ProxyProc["Daemon do Proxy<br/>spillover up<br/>:8787<br/>(long-running)"]:::proc
 
         subgraph Storage["~/.spillover/"]
-            P1["projects/&lt;sha1_cwd_A&gt;/<br/>episodes.db<br/>kuzu/"]:::dev
-            P2["projects/&lt;sha1_cwd_B&gt;/<br/>episodes.db<br/>kuzu/"]:::dev
-            P3["projects/&lt;sha1_cwd_C&gt;/<br/>episodes.db<br/>kuzu/"]:::dev
+            P1["projects/SHA1_A/<br/>episodes.db<br/>kuzu/"]:::dev
+            P2["projects/SHA1_B/<br/>episodes.db<br/>kuzu/"]:::dev
+            P3["projects/SHA1_C/<br/>episodes.db<br/>kuzu/"]:::dev
         end
 
         FECache["~/.cache/fastembed/<br/>nomic-embed-text-v1.5-Q.onnx<br/>(compartilhado entre projetos)"]:::dev
@@ -31,7 +31,7 @@ graph TB
     end
 
     IDE -->|spawna| WrapProc
-    WrapProc -->|"ANTHROPIC_BASE_URL=<br/>http://127.0.0.1:8787/p/&lt;sha1&gt;"| IDE
+    WrapProc -->|"seta ANTHROPIC_BASE_URL<br/>apontando para o proxy"| IDE
     IDE -.->|HTTP loopback| ProxyProc
     ProxyProc --> P1
     ProxyProc --> P2

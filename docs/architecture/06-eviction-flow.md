@@ -23,11 +23,11 @@ flowchart TB
 
     A --> W
     W -->|fill ≥ watermark| P1
-    W -->|fill &lt; watermark| Skip[no-op]
+    W -->|fill abaixo do watermark| Skip[no-op]
     P1 -->|freed ≥ alvo| SR
-    P1 -->|freed &lt; alvo| P2
+    P1 -->|freed abaixo do alvo| P2
     P2 -->|freed ≥ alvo| SR
-    P2 -->|freed &lt; alvo| P3
+    P2 -->|freed abaixo do alvo| P3
     P3 --> SR
     SR --> AR
     AR --> UP

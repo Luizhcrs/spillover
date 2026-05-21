@@ -8,7 +8,7 @@ stateDiagram-v2
     Active --> Active: fica no contexto ativo<br/>enquanto fill_ratio < watermark
 
     Active --> Evicted: fill_ratio ≥ watermark<br/>+ selecionado pela politica 3-pass<br/>+ archive_raw INSERT
-    Active --> Pinned: spillover pin &lt;id&gt;<br/>(exempt de decay)
+    Active --> Pinned: spillover pin id<br/>(exempt de decay)
 
     Evicted --> FacetPending: enfileirado na facet queue
     FacetPending --> FacetPending: fila cheia →<br/>facet_dropped_total++<br/>(retry na proxima request)

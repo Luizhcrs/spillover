@@ -10,7 +10,7 @@ graph TB
 
     user["Desenvolvedor<br/>usa Claude Code / Codex /<br/>Cursor / Continue.dev"]:::person
 
-    spillover["<b>spillover</b><br/>proxy LLM transparente<br/>com memoria por transbordamento"]:::system
+    spillover["spillover<br/>proxy LLM transparente<br/>com memoria por transbordamento"]:::system
 
     anthropic["Anthropic API<br/>api.anthropic.com<br/>/v1/messages"]:::external
     openai["OpenAI API<br/>api.openai.com<br/>/v1/chat/completions"]:::external

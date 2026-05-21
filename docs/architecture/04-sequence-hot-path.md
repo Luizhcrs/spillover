@@ -16,7 +16,7 @@ sequenceDiagram
     participant Q as FacetQueue
     participant M as MetricsSink
 
-    CLI->>+Mid: POST /p/&lt;sha1&gt;/v1/messages
+    CLI->>+Mid: POST /p/SHA1/v1/messages
     Mid->>Mid: extrai project_id<br/>(path > header > env)
     Mid->>+App: dispatch com state.project_id
 

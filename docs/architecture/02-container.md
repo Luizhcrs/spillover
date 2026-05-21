@@ -17,8 +17,8 @@ graph TB
         worker["Facet Worker<br/>asyncio.Queue<br/>maxsize=1024<br/><br/>run_in_executor"]:::container
         decay["Decay Scheduler<br/>cron 6h<br/><br/>asyncio task"]:::container
 
-        sqlite[("SQLite<br/>por projeto<br/>~/.spillover/projects/&lt;pid&gt;/<br/>episodes.db<br/><br/>tabelas: episodes,<br/>seen_turns,<br/>vec_episodes,<br/>episodes_fts")]:::store
-        kuzu[("Kuzu<br/>por projeto<br/>~/.spillover/projects/&lt;pid&gt;/kuzu/<br/><br/>5 node tables +<br/>5 relation tables")]:::store
+        sqlite[("SQLite<br/>por projeto<br/>~/.spillover/projects/PID/<br/>episodes.db<br/><br/>tabelas: episodes,<br/>seen_turns,<br/>vec_episodes,<br/>episodes_fts")]:::store
+        kuzu[("Kuzu<br/>por projeto<br/>~/.spillover/projects/PID/kuzu/<br/><br/>5 node tables +<br/>5 relation tables")]:::store
         fastembed[("cache fastembed<br/>~/.cache/fastembed/<br/>nomic-embed-text-v1.5-Q<br/>~130MB ONNX")]:::store
     end
 

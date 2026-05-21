@@ -16,13 +16,13 @@ flowchart LR
 
     V["VectorIndex<br/>sqlite-vec MATCH<br/>top-K=50"]:::leg
     G["GraphIndex<br/>Kuzu k-hop MENTIONS<br/>k=2, limit 50"]:::leg
-    B["LexicalIndex<br/>SQLite FTS5 BM25<br/>tokenchars ./_-:"]:::leg
+    B["LexicalIndex<br/>SQLite FTS5 BM25<br/>tokenchars dot slash underscore dash colon"]:::leg
     C["CausalityChain<br/>Kuzu walk AFTER<br/>depth=2 a partir de seeds BM25/vector"]:::leg
 
     R["Fusion RRF<br/>weight_type / (60 + rank)<br/>somado entre pernas<br/><br/>type_weights:<br/>priority 1.5<br/>task 1.4<br/>procedural 1.2<br/>episodic 1.0<br/>semantic 1.0"]:::proc
 
     TB["trim_to_budget<br/>(LTM budget =<br/>ceiling × ltm_pct)<br/>SELECT batch de tokens"]:::proc
-    RD["render_ltm_block<br/>framing &lt;spillover-ltm&gt;<br/>+ tags XML por episodio"]:::proc
+    RD["render_ltm_block<br/>framing spillover-ltm<br/>+ tags XML por episodio"]:::proc
 
     INJ["inject_ltm<br/>placement:<br/>between (default)<br/>turns / user / system"]:::out
 

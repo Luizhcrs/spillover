@@ -40,7 +40,7 @@ erDiagram
 
     episodes_fts {
         TEXT episode_id "UNINDEXED"
-        TEXT body "FTS5 tokenize=unicode61 tokenchars ./-_:"
+        TEXT body "FTS5 tokenize unicode61 tokenchars dot slash dash underscore colon"
     }
 
     seen_turns {
