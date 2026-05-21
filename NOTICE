@@ -1,0 +1,18 @@
+spillover
+Copyright 2026 Luiz Henrique Cavalcanti Ramos da Silva
+
+This product includes software developed by Luiz Henrique Cavalcanti Ramos da Silva
+(https://github.com/Luizhcrs/spillover).
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the full text.
+
+Third-party dependencies:
+- FastAPI (MIT) — https://github.com/tiangolo/fastapi
+- httpx (BSD-3-Clause) — https://github.com/encode/httpx
+- sqlite-vec (Apache-2.0) — https://github.com/asg017/sqlite-vec
+- kuzu (MIT) — https://kuzudb.com/
+- fastembed (Apache-2.0) — https://github.com/qdrant/fastembed
+- prometheus_client (Apache-2.0) — https://github.com/prometheus/client_python
+- click (BSD-3-Clause) — https://github.com/pallets/click
+- pydantic (MIT) — https://github.com/pydantic/pydantic
+- uvicorn (BSD-3-Clause) — https://github.com/encode/uvicorn

@@ -3,7 +3,7 @@
 <p align="center"><em>Agents never compact. They spill over.</em></p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Proprietary-red.svg" alt="License: Proprietary" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0" /></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+" /></a>
   <a href="https://github.com/Luizhcrs/spillover/releases/tag/v1.2.0"><img src="https://img.shields.io/badge/release-v1.2.0-green.svg" alt="Release" /></a>
 </p>
@@ -280,11 +280,11 @@ The two POST routes require an `X-Project` HTTP header or a `SPILLOVER_PROJECT_I
 
 ## Contributing
 
-Closed-source for now. PR/issue access by invite. Bug reports against the four supported CLIs are welcome via direct contact.
+PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Capability cards from mneme-style projects, defense patterns from the literature, and bug reports against the four supported CLIs are encouraged.
 
 ## License
 
-Proprietary. All rights reserved.
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ---
 
@@ -361,4 +361,4 @@ Pronto. Todo prompt que teu Claude Code envia agora passa pelo proxy. Overflow i
 
 ## Licenca
 
-Proprietario. Todos direitos reservados.
+Apache-2.0. Ver [LICENSE](LICENSE) e [NOTICE](NOTICE).
