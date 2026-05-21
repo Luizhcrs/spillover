@@ -22,7 +22,6 @@ from spillover.facet.entities import extract_entities
 from spillover.facet.worker import FacetEvent, FacetWorker
 from spillover.logging import configure_root_logger, get_logger
 from spillover.proxy.middleware import ProjectIdMiddleware
-from spillover.proxy.streaming import duplicate_stream
 from spillover.retriever.budget import trim_to_budget
 from spillover.retriever.fusion import rrf_fuse
 from spillover.retriever.graph import graph_walk
@@ -453,90 +452,59 @@ def create_app(config: Config) -> FastAPI:
                 headers={"content-type": "application/json"},
             )
 
-        # Streaming branch
-        if not _stream_rewrite_enabled(config):
-            # Plan 3 behavior: yield live, no SSE usage rewrite
-            upstream = await app.state.http_client.send(
-                app.state.http_client.build_request(
-                    "POST", upstream_url, headers=fwd_headers, content=forwarded_body
-                ),
-                stream=True,
-            )
-            sink: list[bytes] = []
+        # Streaming branch (incremental SSE rewrite)
+        from spillover.counter_compact.sse_rewrite import has_usage_marker, rewrite_sse_body
 
-            async def proxy_stream_live():
-                try:
-                    async for chunk in duplicate_stream(upstream.aiter_bytes(), sink):
-                        yield chunk
-                finally:
-                    await upstream.aclose()
-                    archived_ids_s: list[str] = []
-                    if upstream.status_code == 200:
-                        usage = adapter.extract_usage_sse(sink)
-                        if usage is not None:
-                            assistant_text = adapter.extract_assistant_text_sse(sink)
-                            _evict_loop = asyncio.get_event_loop()
-                            archived_ids_s, _ = await _run_sync(
-                                _evict_loop, _maybe_evict,
-                                config, project_id, payload, assistant_text, usage, adapter
-                            )
-                    if upstream.status_code >= 400:
-                        log.warning(
-                            "upstream non-2xx (stream) status=%d project=%s",
-                            upstream.status_code,
-                            project_id,
+        rewrite_enabled = _stream_rewrite_enabled(config)
+
+        upstream = await app.state.http_client.send(
+            app.state.http_client.build_request(
+                "POST", upstream_url, headers=fwd_headers, content=forwarded_body
+            ),
+            stream=True,
+        )
+        sink: list[bytes] = []
+
+        async def proxy_stream():
+            archived_ids_s: list[str] = []
+            tokens_archived_s = 0
+            tail_buffer = b""
+            try:
+                async for chunk in upstream.aiter_bytes():
+                    sink.append(chunk)
+                    if rewrite_enabled and has_usage_marker(chunk):
+                        # Buffer this chunk so we can rewrite before yielding
+                        tail_buffer += chunk
+                        continue
+                    yield chunk
+            finally:
+                await upstream.aclose()
+                if upstream.status_code == 200:
+                    usage = adapter.extract_usage_sse(sink)
+                    if usage is not None:
+                        assistant_text = adapter.extract_assistant_text_sse(sink)
+                        _evict_loop = asyncio.get_event_loop()
+                        archived_ids_s, tokens_archived_s = await _run_sync(
+                            _evict_loop, _maybe_evict,
+                            config, project_id, payload, assistant_text, usage, adapter,
                         )
-                    if archived_ids_s:
-                        _enqueue_facets(app, project_id, archived_ids_s, config)
-
-            return StreamingResponse(
-                proxy_stream_live(),
-                media_type="text/event-stream",
-                status_code=upstream.status_code,
-            )
-
-        # Buffered SSE with usage rewrite
-        from spillover.counter_compact.sse_rewrite import rewrite_sse_body
-
-        buf = b""
-        upstream_status = 200
-        async with app.state.http_client.stream(
-            "POST", upstream_url, headers=fwd_headers, content=forwarded_body
-        ) as upstream_stream:
-            upstream_status = upstream_stream.status_code
-            async for chunk in upstream_stream.aiter_bytes():
-                buf += chunk
-
-        archived_ids_buf: list[str] = []
-        tokens_archived_buf = 0
-        if upstream_status == 200:
-            usage = adapter.extract_usage_sse([buf])
-            if usage is not None:
-                assistant_text_buf = adapter.extract_assistant_text_sse([buf])
-                archived_ids_buf, tokens_archived_buf = await _run_sync(
-                    loop, _maybe_evict,
-                    config, project_id, payload, assistant_text_buf, usage, adapter,
-                )
-        if upstream_status >= 400:
-            log.warning(
-                "upstream non-2xx (stream-buf) status=%d project=%s",
-                upstream_status,
-                project_id,
-            )
-        if tokens_archived_buf > 0:
-            buf = rewrite_sse_body(buf, tokens_archived_buf)
-        if archived_ids_buf:
-            _enqueue_facets(app, project_id, archived_ids_buf, config)
-
-        _buf_final = buf
-
-        async def proxy_stream_buffered():
-            yield _buf_final
+                if rewrite_enabled and tail_buffer and tokens_archived_s > 0:
+                    yield rewrite_sse_body(tail_buffer, tokens_archived_s)
+                elif tail_buffer:
+                    yield tail_buffer
+                if upstream.status_code >= 400:
+                    log.warning(
+                        "upstream non-2xx (stream) status=%d project=%s",
+                        upstream.status_code,
+                        project_id,
+                    )
+                if archived_ids_s:
+                    _enqueue_facets(app, project_id, archived_ids_s, config)
 
         return StreamingResponse(
-            proxy_stream_buffered(),
+            proxy_stream(),
             media_type="text/event-stream",
-            status_code=upstream_status,
+            status_code=upstream.status_code,
         )
 
     @app.post("/v1/messages")

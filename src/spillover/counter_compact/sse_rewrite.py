@@ -8,6 +8,11 @@ from spillover.counter_compact.usage_rewrite import rewrite_usage
 _DATA_LINE = re.compile(rb"^data:\s*(.*)$", re.MULTILINE)
 
 
+def has_usage_marker(chunk: bytes) -> bool:
+    """Cheap check: does this chunk likely contain a usage field?"""
+    return b'"usage"' in chunk
+
+
 def rewrite_sse_body(body: bytes, tokens_archived_this_turn: int) -> bytes:
     """Walk SSE chunks, rewrite any data: line containing 'usage'."""
     if tokens_archived_this_turn <= 0 or not body:
