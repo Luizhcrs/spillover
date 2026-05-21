@@ -164,15 +164,22 @@ _FINAL_QUESTION = (
 )
 
 
-# precos input/output em USD por 1M tokens (Haiku 4.5 padrao)
-_PRICE_IN_PER_MTOK = 1.00
-_PRICE_OUT_PER_MTOK = 5.00
+# precos por 1M tokens (input, output) USD
+_MODEL_PRICING = {
+    "claude-haiku-4-5-20251001": (1.00, 5.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-opus-4-7": (15.00, 75.00),
+    "claude-opus-4-6": (15.00, 75.00),
+}
 
 
-def _cost(input_tokens: int, output_tokens: int) -> float:
+def _cost(input_tokens: int, output_tokens: int, model: str = "claude-haiku-4-5-20251001") -> float:
+    in_price, out_price = _MODEL_PRICING.get(model, (1.00, 5.00))
     return (
-        input_tokens * _PRICE_IN_PER_MTOK / 1_000_000
-        + output_tokens * _PRICE_OUT_PER_MTOK / 1_000_000
+        input_tokens * in_price / 1_000_000
+        + output_tokens * out_price / 1_000_000
     )
 
 
@@ -229,7 +236,7 @@ def run_cc_realistic(
                 real_input_tokens=0,
                 anchors_hit=[],
                 anchors_missed=BARBER_ANCHORS.copy(),
-                total_cost_usd_est=_cost(total_summary_in, total_summary_out),
+                total_cost_usd_est=_cost(total_summary_in, total_summary_out, model),
                 latency_ms=int((time.time() - t0) * 1000),
                 error=f"compaction call failed: {e}",
             )
@@ -283,7 +290,7 @@ def run_cc_realistic(
             real_input_tokens=in_t,
             anchors_hit=hits,
             anchors_missed=misses,
-            total_cost_usd_est=_cost(total_summary_in + in_t, total_summary_out + out_t),
+            total_cost_usd_est=_cost(total_summary_in + in_t, total_summary_out + out_t, model),
             latency_ms=int((time.time() - t0) * 1000),
         )
     except Exception as e:
@@ -300,7 +307,7 @@ def run_cc_realistic(
             real_input_tokens=0,
             anchors_hit=[],
             anchors_missed=BARBER_ANCHORS.copy(),
-            total_cost_usd_est=_cost(total_summary_in, total_summary_out),
+            total_cost_usd_est=_cost(total_summary_in, total_summary_out, model),
             latency_ms=int((time.time() - t0) * 1000),
             error=str(e),
         )
@@ -342,7 +349,7 @@ def run_spillover_full(
             real_input_tokens=real_in,
             anchors_hit=hits,
             anchors_missed=misses,
-            total_cost_usd_est=_cost(real_in, out_t),
+            total_cost_usd_est=_cost(real_in, out_t, model),
             latency_ms=int((time.time() - t0) * 1000),
         )
     except Exception as e:

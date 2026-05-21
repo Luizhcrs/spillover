@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barbearia Três Tesouras</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #1a1a1a;
+            --secondary: #d4a574;
+            --background: #f5f1ea;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background);
+        }
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Playfair Display', serif;
+        }
+        .btn-primary {
+            background-color: var(--secondary);
+            color: white;
+            padding: 12px 32px;
+            border-radius: 24px;
+            font-weight: 600;
+            transition: all 200ms;
+            cursor: pointer;
+            border: none;
+        }
+        .btn-primary:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        }
+        .card {
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            transition: all 200ms;
+        }
+        .card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        }
+        .nav-link {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 200ms;
+        }
+        .nav-link:hover, .nav-link.active {
+            color: var(--secondary);
+        }
+        .screen {
+            display: none;
+        }
+        .screen.active {
+            display: block;
+        }
+        @media (max-width: 768px) {
+            nav {
+                flex-direction: column;
+                gap: 12px;
+            }
+        }
+    </style>
+</head>
+<body class="bg-[#f5f1ea]">
+    <nav class="fixed top-0 left-0 right-0 bg-white shadow-md px-6 py-4 flex justify-between items-center z-50">
+        <div class="flex items-center gap-3">
+            <span class="text-2xl font-bold" style="color: #1a1a1a;">✂️</span>
+            <h1 class="text-xl font-bold" style="color: #1a1a1a;">Três Tesouras</h1>
+        </div>
+        <div class="hidden md:flex gap-8 items-center">
+            <a href="#home" class="nav-link" onclick="navigateTo('home')">Home</a>
+            <a href="#agendar" class="nav-link" onclick="navigateTo('agendar')">Agendar</a>
+            <a href="#meus-agendamentos" class="nav-link" onclick="navigateTo('meus-agendamentos')">Meus Agendamentos</a>
+            <a href="#sobre" class="nav-link" onclick="navigateTo('sobre')">Sobre</a>
+            <button class="btn-primary" onclick="navigateTo('agendar')">Agendar Agora</button>
+        </div>
+    </nav>
+
+    <div style="padding-top: 80px;">
+        <!-- HOME SCREEN -->
+        <div id="home" class="screen active">
+            <div class="min-h-screen bg-[#f5f1ea] flex flex-col justify-center items-center px-6">
+                <h1 class="text-6xl font-bold text-center mb-6" style="color: #1a1a1a;">Bem-vindo à Barbearia Três Tesouras</h1>
+                <p class="text-xl text-center mb-12 max-w-2xl" style="color: #1a1a1a;">Qualidade, profissionalismo e estilo em cada corte. Experimente o melhor da barbearia de São Paulo.</p>
+                <button class="btn-primary mb-12" onclick="navigateTo('agendar')">Agendar Agora</button>
+                
+                <div class="grid md:grid-cols-3 gap-8 max-w-5xl w-full">
+                    <div class="card bg-white p-8">
+                        <h3 class="text-2xl font-bold mb-4" style="color: #1a1a1a;">João</h3>
+                        <p class="mb-4" style="color: #1a1a1a;">15 anos de experiência</p>
+                        <p style="color: #d4a574; font-weight: 600;">Especialista em degradê</p>
+                    </div>
+                    <div class="card bg-white p-8">
+                        <h3 class="text-2xl font-bold mb-4" style="color: #1a1a1a;">Pedro</h3>
+                        <p class="mb-4" style="color: #1a1a1a;">8 anos de experiência</p>
+                        <p style="color: #d4a574; font-weight: 600;">Especialista em barba</p>
+                    </div>
+                    <div class="card bg-white p-8">
+                        <h3 class="text-2xl font-bold mb-4" style="color: #1a1a1a;">Carlos</h3>
+                        <p class="mb-4" style="color: #1a1a1a;">5 anos de experiência</p>
+                        <p style="color: #d4a574; font-weight: 600;">Especialista em jovens</p>
+                    </div>
+                </div>
+
+                <div class="mt-16 text-center">
+                    <h2 class="text-4xl font-bold mb-8" style="color: #1a1a1a;">Serviços</h2>
+                    <div class="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+                        <div class="card bg-white p-6">
+                            <h4 class="text-lg font-bold mb-2" style="color: #1a1a1a;">Corte Masculino</h4>
+                            <p class="mb-2" style="color: #d4a574;">R$ 45,00</p>
+                            <p style="color: #666;">30 minutos</p>
+                        </div>
+                        <div class="card bg-white p-6">
+                            <h4 class="text-lg font-bold mb-2" style="color: #1a1a1a;">Barba Completa</h4>
+                            <p class="mb-2" style="color: #d4a574;">R$ 35,00</p>
+                            <p style="color: #666;">30 minutos</p>
+                        </div>
+                        <div class="card bg-white p-6">
+                            <h4 class="text-lg font-bold mb-2" style="color: #1a1a1a;">Combo</h4>
+                            <p class="mb-2" style="color: #d4a574;">R$ 75,00</p>
+                            <p style="color: #666;">60 minutos</p>
+                        </div>
+                        <div class="card bg-white p-6">
+                            <h4 class="text-lg font-bold mb-2" style="color: #1a1a1a;">Pigmentação</h4>
+                            <p class="mb-2" style="color: #d4a574;">R$ 90,00</p>
+                            <p style="color: #666;">90 minutos</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- AGENDAR SCREEN -->
+        <div id="agendar" class="screen">
+            <div class="min-h-screen bg-[#f5f1ea] flex justify-center items-center px-6 py-12">
+                <div class="card bg-white p-12 max-w-2xl w-full">
+                    <h2 class="text-4xl font-bold mb-8" style="color: #1a1a1a;">Agendar Horário</h2>
+                    
+                    <div class="mb-6">
+                        <label class="block text-sm font-semibold mb-2" style="color: #1a1a1a;">Seu Nome</label>
+                        <input type="text" id="cliente_nome" class="w-full px-4 py-3 border border-gray-300 rounded-lg" placeholder="Digite seu nome" style="background-color: #f5f1ea;">
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-sm font-semibold mb-2" style="color: #1a1a1a;">Telefone</label>
+                        <input type="tel" id="cliente_telefone" class="w-full px-4 py-3 border border-gray-300 rounded-lg" placeholder="11 98765-4321" style="background-color: #f5f1ea;">
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-sm font-semibold mb-2" style="color: #1a1a1a;">Barbeiro</label>
+                        <select id="barbeiro_id" class="w-full px-4 py-3 border border-gray-300 rounded-lg" style="background-color: #f5f1ea;">
+                            <option value="">Selecione um barbeiro</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-sm font-semibold mb-2" style="color: #1a1a1a;">Serviço</label>
+                        <select id="servico_id" class="w-full px-4 py-3 border border-gray-300 rounded-lg" style="background-color: #f5f1ea;">
+                            <option value="">Selecione um serviço</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-8">
+                        <label class="block text-sm font-semibold mb-2" style="color: #1a1a1a;">Data e Hora</label>
+                        <input type="datetime-local" id="data_hora" class="w-full px-4 py-3 border border-gray-300 rounded-lg" style="background-color: #f5f1ea;">
+                    </div>
+
+                    <button class="btn-primary w-full" onclick="submitAgendamento()">Confirmar Agendamento</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONFIRMAÇÃO SCREEN -->
+        <div id="confirmacao" class="screen">
+            <div class="min-h-screen bg-[#f5f1ea] flex justify-center items-center px-6">
+                <div class="card bg-white p-12 max-w-2xl w-full text-center">
+                    <h2 class="text-4xl font-bold mb-6" style="color: #1a1a1a;">✓ Agendamento Confirmado</h2>
+                    <p class="text-xl mb-8" style="color: #1a1a1a;">Seu agendamento foi confirmado com sucesso!</p>
+                    <p class="mb-8" style="color: #666;">Um SMS foi enviado para o número fornecido.</p>
+                    <button class="btn-primary" onclick="navigateTo('home')">Voltar ao Início</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MEUS AGENDAMENTOS SCREEN -->
+        <div id="meus-agendamentos" class="screen">
+            <div class="min-h-screen bg-[#f5f1ea] px-6 py-12">
+                <div class="max-w-4xl mx-auto">
+                    <h2 class="text-4xl font-bold mb-8" style="color: #1a1a1a;">Meus Agendamentos</h2>
+                    
+                    <div class="mb-8">
+                        <label class="block text-sm font-semibold mb-2" style="color: #1a1a1a;">Digite seu telefone:</label>
+                        <input type="tel" id="buscar_telefone" class="w-full px-4 py-3 border border-gray-300 rounded-lg mb-4" placeholder="11 98765-4321" style="background-color: #f5f1ea;">
+                        <button class="btn-primary" onclick="buscarAgendamentos()">Buscar Agendamentos</button>
+                    </div>
+
+                    <div id="agendamentos-list" class="space-y-4"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SOBRE SCREEN -->
+        <div id="sobre" class="screen">
+            <div class="min-h-screen bg-[#f5f1ea] flex flex-col justify-center items-center px-6 py-12">
+                <div class="max-w-3xl">
+                    <h2 class="text-4xl font-bold mb-8 text-center" style="color: #1a1a1a;">Sobre Nós</h2>
+                    
+                    <div class="card bg-white p-12 mb-8">
+                        <h3 class="text-2xl font-bold mb-4" style="color: #1a1a1a;">Barbearia Três Tesouras</h3>
+                        <p class="mb-4" style="color: #1a1a1a;">
+                            Localizada na Rua das Palmeiras, 123 em São Paulo, a Barbearia Três Tesouras é referência em qualidade e profissionalismo.
+                        </p>
+                        <p class="mb-4" style="color: #1a1a1a;">
+                            Com três barbeiros experientes, oferecemos uma variedade de serviços para todos os tipos de cliente, desde cortes modernos até acabamentos precisos em barba.
+                        </p>
+                    </div>
+
+                    <div class="card bg-white p-8 mb-8">
+                        <h4 class="text-xl font-bold mb-4" style="color: #1a1a1a;">📍 Endereço</h4>
+                        <p style="color: #1a1a1a;">Rua das Palmeiras, 123 - São Paulo, SP</p>
+                    </div>
+
+                    <div class="card bg-white p-8 mb-8">
+                        <h4 class="text-xl font-bold mb-4" style="color: #1a1a1a;">📞 Telefone</h4>
+                        <p style="color: #1a1a1a;">(11) 98765-4321</p>
+                    </div>
+
+                    <div class="card bg-white p-8">
+                        <h4 class="text-xl font-bold mb-4" style="color: #1a1a1a;">🕐 Horários</h4>
+                        <p style="color: #1a1a1a;">Terça a Sábado: 9h00 - 19h00</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-[#1a1a1a] text-white text-center py-8 mt-16">
+        <p>&copy; 2024 Barbearia Três Tesouras. Todos os direitos reservados.</p>
+    </footer>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api';
+
+        function navigateTo(screen) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screen).classList.add('active');
+            window.location.hash = screen;
+            if (screen === 'agendar') {
+                loadBarbeiros();
+                loadServicos();
+            }
+        }
+
+        async function loadBarbeiros() {
+            try {
+                const response = await fetch(`${API_URL}/barbeiros`);
+                const barbeiros = await response.json();
+                const select = document.getElementById('barbeiro_id');
+                select.innerHTML = '<option value="">Selecione um barbeiro</option>';
+                barbeiros.forEach(b => {
+                    const option = document.createElement('option');
+                    option.value = b.id;
+                    option.textContent = `${b.nome} (${b.especialidade})`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Erro ao carregar barbeiros:', error);
+            }
+        }
+
+        async function loadServicos() {
+            try {
+                const response = await fetch(`${API_URL}/servicos`);
+                const servicos = await response.json();
+                const select = document.getElementById('servico_id');
+                select.innerHTML = '<option value="">Selecione um serviço</option>';
+                servicos.forEach(s => {
+                    const option = document.createElement('option');
+                    option.value = s.id;
+                    option.textContent = `${s.nome} - R$ ${s.preco.toFixed(2)} (${s.duracao_min}min)`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Erro ao carregar serviços:', error);
+            }
+        }
+
+        async function submitAgendamento() {
+            const nome = document.getElementById('cliente_nome').value;
+            const telefone = document.getElementById('cliente_telefone').value;
+            const barbeiro_id = parseInt(document.getElementById('barbeiro_id').value);
+            const servico_id = parseInt(document.getElementById('servico_id').value);
+            const data_hora = document.getElementById('data_hora').value;
+
+            if (!nome || !telefone || !barbeiro_id || !servico_id || !data_hora) {
+                alert('Por favor, preencha todos os campos');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/agendamentos`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        barbeiro_id,
+                        servico_id,
+                        cliente_nome: nome,
+                        cliente_telefone: telefone,
+                        data_hora: new Date(data_hora).toISOString()
+                    })
+                });
+
+                if (response.ok) {
+                    navigateTo('confirmacao');
+                } else {
+                    alert('Erro ao agendar. Tente novamente.');
+                }
+            } catch (error) {
+                console.error('Erro:', error);
+                alert('Erro ao agendar. Tente novamente.');
+            }
+        }
+
+        async function buscarAgendamentos() {
+            const telefone = document.getElementById('buscar_telefone').value;
+            if (!telefone) {
+                alert('Digite um telefone');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/agendamentos?telefone=${telefone}`);
+                const agendamentos = await response.json();
+                const list = document.getElementById('agendamentos-list');
+                
+                if (agendamentos.length === 0) {
+                    list.innerHTML = '<p style="color: #1a1a1a;">Nenhum agendamento encontrado.</p>';
+                    return;
+                }
+
+                list.innerHTML = agendamentos.map(a => `
+                    <div class="card bg-white p-6">
+                        <h4 class="text-lg font-bold mb-2" style="color: #1a1a1a;">Agendamento #${a.id}</h4>
+                        <p class="mb-2" style="color: #1a1a1a;">Cliente: ${a.cliente_nome}</p>
+                        <p class="mb-2" style="color: #1a1a1a;">Data: ${new Date(a.data_hora).toLocaleString('pt-BR')}</p>
+                        <p class="mb-4" style="color: #d4a574; font-weight: 600;">Status: ${a.status}</p>
+                        <button class="btn-primary" onclick="cancelarAgendamento(${a.id})">Cancelar Agendamento</button>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Erro:', error);
+                alert('Erro ao buscar agendamentos.');
+            }
+        }
+
+        async function cancelarAgendamento(id) {
+            if (!confirm('Tem certeza que deseja cancelar este agendamento?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/agendamentos/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('Agendamento cancelado com sucesso');
+                    const telefone = document.getElementById('buscar_telefone').value;
+                    if (telefone) {
+                        buscarAgendamentos();
+                    }
+                } else if (response.status === 403) {
+                    alert('Não é possível cancelar com menos de 1 hora de antecedência');
+                } else {
+                    alert('Erro ao cancelar agendamento');
+                }
+            } catch (error) {
+                console.error('Erro:', error);
+                alert('Erro ao cancelar agendamento');
+            }
+        }
+
+        window.addEventListener('load', () => {
+            const hash = window.location.hash.substring(1) || 'home';
+            navigateTo(hash);
+        });
+    </script>
+</body>
+</html>
+```
+
+```

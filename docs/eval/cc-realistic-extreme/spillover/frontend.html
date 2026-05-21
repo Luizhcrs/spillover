@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barbearia Tres Tesouras</title>
+    <meta name="description" content="A melhor barbearia da cidade. Tres barbeiros experientes esperando voce.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75'>✂️</text></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f5f1ea;
+            color: #1a1a1a;
+            font-family: 'Inter', sans-serif;
+        }
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Playfair Display', serif;
+        }
+        .btn-primary {
+            background-color: #d4a574;
+            color: #1a1a1a;
+            border-radius: 24px;
+            padding: 12px 24px;
+            transition: all 200ms ease;
+        }
+        .btn-primary:hover {
+            transform: scale(1.02);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+        }
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            transition: all 200ms ease;
+        }
+        .card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        }
+        .nav-fixed {
+            background-color: #1a1a1a;
+            color: #f5f1ea;
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 1000;
+            padding: 16px 0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .nav-link {
+            color: #f5f1ea;
+            text-decoration: none;
+            transition: color 200ms;
+            margin: 0 16px;
+        }
+        .nav-link:hover {
+            color: #d4a574;
+        }
+        .main-content {
+            margin-top: 70px;
+        }
+        .hero {
+            background-color: #1a1a1a;
+            color: #f5f1ea;
+            padding: 80px 20px;
+            text-align: center;
+        }
+        .hero h1 {
+            font-size: 72px;
+            margin-bottom: 20px;
+            line-height: 1.2;
+        }
+        .hero p {
+            font-size: 18px;
+            margin-bottom: 40px;
+        }
+        .section {
+            padding: 60px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .section h2 {
+            font-size: 48px;
+            margin-bottom: 40px;
+            text-align: center;
+        }
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+        }
+        .grid-5 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 24px;
+        }
+        .footer {
+            background-color: #1a1a1a;
+            color: #f5f1ea;
+            padding: 40px 20px;
+            margin-top: 40px;
+        }
+        .footer-cols {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 40px;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-family: 'Inter', sans-serif;
+            font-size: 16px;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #d4a574;
+            box-shadow: 0 0 0 3px rgba(212, 165, 116, 0.1);
+        }
+        .screen {
+            display: none;
+        }
+        .screen.active {
+            display: block;
+        }
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 36px;
+            }
+            .grid-3,
+            .grid-5 {
+                grid-template-columns: 1fr;
+            }
+            .footer-cols {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="nav-fixed">
+        <div class="max-w-6xl mx-auto px-4 flex items-center justify-between">
+            <div class="text-2xl font-bold" style="font-family: 'Playfair Display', serif;">✂️ Tres Tesouras</div>
+            <div class="hidden md:flex items-center">
+                <a href="#home" class="nav-link" onclick="showScreen('home')">Home</a>
+                <a href="#agendar" class="nav-link" onclick="showScreen('agendar')">Agendar</a>
+                <a href="#meus-agendamentos" class="nav-link" onclick="showScreen('meus-agendamentos')">Meus Agendamentos</a>
+                <a href="#sobre" class="nav-link" onclick="showScreen('sobre')">Sobre</a>
+            </div>
+            <button class="btn-primary" onclick="showScreen('agendar')">Agendar agora</button>
+        </div>
+    </nav>
+
+    <div class="main-content">
+        <div id="home" class="screen active">
+            <div class="hero">
+                <h1>O melhor corte da cidade</h1>
+                <p>Tradicao desde 1995. Tres barbeiros experientes esperando voce.</p>
+                <button class="btn-primary" onclick="showScreen('agendar')">Agendar agora</button>
+            </div>
+
+            <div class="section">
+                <h2>Servicos</h2>
+                <div class="grid-5" id="servicos-grid"></div>
+            </div>
+
+            <div class="section">
+                <h2>Nossos Barbeiros</h2>
+                <div class="grid-3" id="barbeiros-grid"></div>
+            </div>
+        </div>
+
+        <div id="agendar" class="screen">
+            <div class="section">
+                <h2>Agendar Horario</h2>
+                <div class="max-w-2xl mx-auto card p-8">
+                    <form id="form-agendamento" onsubmit="submitAgendamento(event)">
+                        <div class="form-group">
+                            <label for="barbeiro">Barbeiro</label>
+                            <select id="barbeiro" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="servico">Servico</label>
+                            <select id="servico" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="data">Data</label>
+                            <input type="date" id="data" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="horario">Horario</label>
+                            <select id="horario" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="nome">Nome</label>
+                            <input type="text" id="nome" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="telefone">Telefone</label>
+                            <input type="tel" id="telefone" required>
+                        </div>
+                        <button type="submit" class="btn-primary w-full">Confirmar Agendamento</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div id="meus-agendamentos" class="screen">
+            <div class="section">
+                <h2>Meus Agendamentos</h2>
+                <div class="max-w-2xl mx-auto">
+                    <div class="form-group mb-6">
+                        <label for="telefone-busca">Telefone</label>
+                        <input type="tel" id="telefone-busca" placeholder="(11) 98765-4321" required>
+                    </div>
+                    <button class="btn-primary" onclick="buscarAgendamentos()">Buscar</button>
+                    <div id="agendamentos-lista" class="mt-8"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="sobre" class="screen">
+            <div class="section">
+                <h2>Sobre Nos</h2>
+                <div class="max-w-2xl mx-auto">
+                    <img src="https://placehold.co/800x400/1a1a1a/d4a574?text=Tres+Tesouras" alt="Fachada" class="w-full rounded-lg mb-8">
+                    <div class="card p-8">
+                        <h3 style="font-size: 24px; margin-bottom: 20px;">Barbearia Tres Tesouras</h3>
+                        <p style="margin-bottom: 16px;"><strong>Endereco:</strong> Rua das Palmeiras 123 - Sao Paulo SP</p>
+                        <p style="margin-bottom: 16px;"><strong>Telefone:</strong> (11) 98765-4321</p>
+                        <p style="margin-bottom: 16px;"><strong>WhatsApp:</strong> (11) 98765-4321</p>
+                        <p style="margin-bottom: 16px;"><strong>Horario:</strong> Terça a Sábado, 9h às 19h</p>
+                        <p>Fechado domingo e segunda.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="footer-cols">
+            <div>
+                <h4 style="font-family: 'Playfair Display', serif; margin-bottom: 16px;">Contato</h4>
+                <p>Rua das Palmeiras 123</p>
+                <p>Sao Paulo SP</p>
+                <p style="margin-top: 12px;">Tel: (11) 98765-4321</p>
+                <p>WhatsApp: (11) 98765-4321</p>
+            </div>
+            <div>
+                <h4 style="font-family: 'Playfair Display', serif; margin-bottom: 16px;">Horario</h4>
+                <p>Terca a Sabado</p>
+                <p>9h às 19h</p>
+                <p style="margin-top: 12px; color: #d4a574;">Domingo e Segunda: Fechado</p>
+            </div>
+            <div>
+                <h4 style="font-family: 'Playfair Display', serif; margin-bottom: 16px;">Redes Sociais</h4>
+                <p><a href="#" style="color: #d4a574; text-decoration: none;">Instagram</a></p>
+                <p><a href="#" style="color: #d4a574; text-decoration: none;">Facebook</a></p>
+                <p><a href="#" style="color: #d4a574; text-decoration: none;">WhatsApp</a></p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const API_URL = "http://localhost:8000/api";
+
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+            window.scrollTo(0, 0);
+        }
+
+        async function loadBarbeiros() {
+            try {
+                const res = await fetch(`${API_URL}/barbeiros`);
+                const barbeiros = await res.json();
+                const select = document.getElementById('barbeiro');
+                select.innerHTML = '<option value="">Selecione um barbeiro</option>';
+                barbeiros.forEach(b => {
+                    const opt = document.createElement('option');
+                    opt.value = b.id;
+                    opt.textContent = `${b.nome} (${b.experiencia} anos)`;
+                    select.appendChild(opt);
+                });
+
+                const grid = document.getElementById('barbeiros-grid');
+                grid.innerHTML = barbeiros.map(b => `
+                    <div class="card p-6 text-center">
+                        <img src="https://placehold.co/200x200/1a1a1a/d4a574?text=${b.nome}" alt="${b.nome}" class="w-full rounded-lg mb-4">
+                        <h3 style="font-family: 'Playfair Display', serif; font-size: 22px; margin-bottom: 8px;">${b.nome}</h3>
+                        <p style="color: #666; margin-bottom: 8px;">${b.experiencia} anos de experiencia</p>
+                        <p style="color: #d4a574; font-weight: 500;">Especialista em ${b.especialidade}</p>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Erro carregando barbeiros:', e);
+            }
+        }
+
+        async function loadServicos() {
+            try {
+                const res = await fetch(`${API_URL}/servicos`);
+                const servicos = await res.json();
+                const select = document.getElementById('servico');
+                select.innerHTML = '<option value="">Selecione um servico</option>';
+                servicos.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.id;
+                    opt.textContent = `${s.nome} - R$ ${s.preco.toFixed(2)}`;
+                    select.appendChild(opt);
+                });
+
+                const grid = document.getElementById('servicos-grid');
+                grid.innerHTML = servicos.map(s => `
+                    <div class="card p-6">
+                        <h3 style="font-family: 'Playfair Display', serif; font-size: 20px; margin-bottom: 12px;">${s.nome}</h3>
+                        <p style="font-size: 24px; color: #d4a574; font-weight: bold; margin-bottom: 8px;">R$ ${s.preco.toFixed(2)}</p>
+                        <p style="color: #666; margin-bottom: 16px;">${s.duracao_min} minutos</p>
+                        <button class="btn-primary w-full" onclick="showScreen('agendar')">Agendar</button>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Erro carregando servicos:', e);
+            }
+        }
+
+        function gerarHorarios() {
+            const horarios = [];
+            for (let h = 9; h < 19; h++) {
+                for (let m = 0; m < 60; m += 30) {
+                    const hora = String(h).padStart(2, '0');
+                    const min = String(m).padStart(2, '0');
+                    horarios.push(`${hora}:${min}`);
+                }
+            }
+            return horarios;
+        }
+
+        function setupHorarios() {
+            const select = document.getElementById('horario');
+            const horarios = gerarHorarios();
+            select.innerHTML = '<option value="">Selecione um horario</option>';
+            horarios.forEach(h => {
+                const opt = document.createElement('option');
+                opt.value = h;
+                opt.textContent = h;
+                select.appendChild(opt);
+            });
+        }
+
+        async function submitAgendamento(e) {
+            e.preventDefault();
+            const barbeiro_id = document.getElementById('barbeiro').value;
+            const servico_id = document.getElementById('servico').value;
+            const data = document.getElementById('data').value;
+            const horario = document.getElementById('horario').value;
+            const cliente_nome = document.getElementById('nome').value;
+            const cliente_telefone = document.getElementById('telefone').value;
+
+            if (!barbeiro_id || !servico_id || !data || !horario) {
+                alert('Preencha todos os campos');
+                return;
+            }
+
+            const data_hora = `${data}T${horario}:00`;
+
+            try {
+                const res = await fetch(`${API_URL}/agendamentos`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({barbeiro_id, servico_id, cliente_nome, cliente_telefone, data_hora})
+                });
+
+                if (res.ok) {
+                    alert('Agendamento confirmado! Voce recebera uma mensagem no WhatsApp.');
+                    document.getElementById('form-agendamento').reset();
+                    showScreen('home');
+                } else {
+                    alert('Erro ao agendar');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro ao agendar');
+            }
+        }
+
+        async function buscarAgendamentos() {
+            const telefone = document.getElementById('telefone-busca').value;
+            if (!telefone) {
+                alert('Digite seu telefone');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/agendamentos?telefone=${encodeURIComponent(telefone)}`);
+                const agendamentos = await res.json();
+                const lista = document.getElementById('agendamentos-lista');
+
+                if (agendamentos.length === 0) {
+                    lista.innerHTML = '<p style="text-align: center; color: #666;">Nenhum agendamento encontrado</p>';
+                    return;
+                }
+
+                lista.innerHTML = agendamentos.map(a => `
+                    <div class="card p-6 mb-4">
+                        <p><strong>Data/Hora:</strong> ${a.data_hora}</p>
+                        <p><strong>Cliente:</strong> ${a.cliente_nome}</p>
+                        <p><strong>Status:</strong> ${a.status}</p>
+                        <button class="btn-primary mt-4" onclick="cancelarAgendamento(${a.id})">Cancelar</button>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro ao buscar agendamentos');
+            }
+        }
+
+        async function cancelarAgendamento(id) {
+            if (!confirm('Tem certeza que deseja cancelar?')) return;
+
+            try {
+                const res = await fetch(`${API_URL}/agendamentos/${id}`, {method: 'DELETE'});
+
+                if (res.ok) {
+                    alert('Agendamento cancelado');
+                    buscarAgendamentos();
+                } else if (res.status === 403) {
+                    alert('Nao pode cancelar com menos de 1 hora de antecedencia');
+                } else {
+                    alert('Erro ao cancelar');
+                }
+            } catch (e) {
+                console.error('Erro:', e);
+                alert('Erro ao cancelar');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadBarbeiros();
+            loadServicos();
+            setupHorarios();
+        });
+    </script>
+</body>
+</html>
+```
+
+```
