@@ -1,0 +1,859 @@
+```html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Burger App</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 20px;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .screen {
+            width: 375px;
+            height: 812px;
+            background: white;
+            border-radius: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .screen-content {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .screen-content::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .screen-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .screen-content::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 2px;
+        }
+
+        /* SCREEN 1: HOME */
+        .header {
+            background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+            color: white;
+            padding: 20px;
+            padding-top: 40px;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .header-title {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .header-icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: rgba(255,255,255,0.15);
+            border-radius: 12px;
+            padding: 12px 16px;
+            gap: 10px;
+        }
+
+        .search-box input {
+            background: none;
+            border: none;
+            color: white;
+            flex: 1;
+            font-size: 16px;
+            outline: none;
+        }
+
+        .search-box input::placeholder {
+            color: rgba(255,255,255,0.7);
+        }
+
+        .categories {
+            display: flex;
+            gap: 12px;
+            padding: 20px;
+            overflow-x: auto;
+            scroll-behavior: smooth;
+        }
+
+        .categories::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .categories::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+        }
+
+        .category-btn {
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: none;
+            background: #e5e7eb;
+            color: #374151;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.3s;
+        }
+
+        .category-btn.active {
+            background: #7C3AED;
+            color: white;
+        }
+
+        .category-btn:hover {
+            background: #d1d5db;
+        }
+
+        .category-btn.active:hover {
+            background: #6D28D9;
+        }
+
+        .menu-section {
+            padding: 0 20px 20px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 15px;
+        }
+
+        .menu-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .menu-item {
+            background: white;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid #e5e7eb;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .menu-item:hover {
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+
+        .menu-item-image {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            background: #f3f4f6;
+        }
+
+        .menu-item-info {
+            padding: 12px;
+        }
+
+        .menu-item-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 6px;
+        }
+
+        .menu-item-price {
+            font-size: 16px;
+            font-weight: 700;
+            color: #7C3AED;
+        }
+
+        /* SCREEN 2: DETAIL */
+        .detail-image {
+            width: 375px;
+            height: 300px;
+            object-fit: cover;
+        }
+
+        .detail-container {
+            padding: 20px;
+        }
+
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .detail-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #111827;
+            flex: 1;
+        }
+
+        .detail-rating {
+            background: #FCD34D;
+            color: #78350F;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            margin-top: 4px;
+        }
+
+        .detail-description {
+            font-size: 14px;
+            color: #6B7280;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .detail-section {
+            margin-bottom: 24px;
+        }
+
+        .detail-section-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #111827;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .size-options {
+            display: flex;
+            gap: 12px;
+        }
+
+        .size-btn {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 10px;
+            background: white;
+            color: #6B7280;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .size-btn.active {
+            border-color: #7C3AED;
+            background: #f3e8ff;
+            color: #7C3AED;
+        }
+
+        .extras {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .extra-item {
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 10px;
+            background: white;
+            color: #6B7280;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .extra-item.selected {
+            border-color: #7C3AED;
+            background: #f3e8ff;
+            color: #7C3AED;
+        }
+
+        .extra-checkbox {
+            width: 18px;
+            height: 18px;
+            border: 2px solid currentColor;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .extra-item.selected .extra-checkbox {
+            background: #7C3AED;
+            border-color: #7C3AED;
+            color: white;
+            font-size: 12px;
+        }
+
+        .detail-price {
+            font-size: 28px;
+            font-weight: 700;
+            color: #7C3AED;
+            margin-bottom: 20px;
+        }
+
+        .detail-bottom {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .qty-selector {
+            display: flex;
+            align-items: center;
+            background: #f3f4f6;
+            border-radius: 10px;
+            padding: 8px;
+            gap: 12px;
+        }
+
+        .qty-btn {
+            width: 32px;
+            height: 32px;
+            background: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 18px;
+            font-weight: 700;
+            color: #7C3AED;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .qty-btn:hover {
+            background: #e5e7eb;
+        }
+
+        .qty-display {
+            font-size: 14px;
+            font-weight: 600;
+            color: #111827;
+            min-width: 20px;
+            text-align: center;
+        }
+
+        .add-to-cart-btn {
+            flex: 1;
+            background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .add-to-cart-btn:hover {
+            box-shadow: 0 8px 16px rgba(124, 58, 237, 0.3);
+            transform: translateY(-2px);
+        }
+
+        /* SCREEN 3: CART */
+        .cart-header {
+            background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+            color: white;
+            padding: 20px;
+            padding-top: 40px;
+        }
+
+        .cart-title {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .cart-items {
+            padding: 20px;
+        }
+
+        .cart-item {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            background: white;
+            border-radius: 12px;
+            padding: 12px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .cart-item-image {
+            width: 80px;
+            height: 80px;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+
+        .cart-item-details {
+            flex: 1;
+        }
+
+        .cart-item-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 4px;
+        }
+
+        .cart-item-extras {
+            font-size: 12px;
+            color: #9CA3AF;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .cart-item-price {
+            font-size: 16px;
+            font-weight: 700;
+            color: #7C3AED;
+        }
+
+        .cart-item-qty {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .cart-qty-btn {
+            width: 24px;
+            height: 24px;
+            background: #f3f4f6;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 700;
+            color: #7C3AED;
+            cursor: pointer;
+        }
+
+        .cart-qty-display {
+            width: 24px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .empty-message {
+            text-align: center;
+            padding: 40px 20px;
+            color: #9CA3AF;
+        }
+
+        .summary {
+            border-top: 1px solid #e5e7eb;
+            padding: 20px;
+            background: #f9fafb;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .summary-label {
+            color: #6B7280;
+        }
+
+        .summary-value {
+            color: #111827;
+            font-weight: 600;
+        }
+
+        .summary-row.total {
+            font-size: 18px;
+            font-weight: 700;
+            color: #111827;
+            padding-top: 12px;
+            border-top: 1px solid #e5e7eb;
+            margin-top: 12px;
+        }
+
+        .summary-row.total .summary-value {
+            color: #7C3AED;
+        }
+
+        .checkout-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 12px;
+            transition: all 0.3s;
+        }
+
+        .checkout-btn:hover {
+            box-shadow: 0 8px 16px rgba(124, 58, 237, 0.3);
+            transform: translateY(-2px);
+        }
+
+        /* BOTTOM NAV */
+        .bottom-nav {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: white;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            color: #9CA3AF;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .nav-item.active {
+            color: #7C3AED;
+        }
+
+        .nav-icon {
+            font-size: 24px;
+        }
+
+        .screen-content {
+            padding-bottom: 60px;
+        }
+    </style>
+</head>
+<body>
+    <!-- SCREEN 1: HOME -->
+    <div class="screen">
+        <div class="screen-content">
+            <div class="header">
+                <div class="header-top">
+                    <div class="header-title">Burger</div>
+                    <div class="header-icon">🔔</div>
+                </div>
+                <div class="search-box">
+                    <span>🔍</span>
+                    <input type="text" placeholder="Buscar hamburguesas...">
+                </div>
+            </div>
+
+            <div class="categories">
+                <button class="category-btn active">Todo</button>
+                <button class="category-btn">Hamburguesas</button>
+                <button class="category-btn">Pizzas</button>
+                <button class="category-btn">Bebidas</button>
+            </div>
+
+            <div class="menu-section">
+                <div class="section-title">Populares</div>
+                <div class="menu-grid">
+                    <div class="menu-item">
+                        <img src="https://placehold.co/200x120/7C3AED/white?text=Burger" alt="Burger" class="menu-item-image">
+                        <div class="menu-item-info">
+                            <div class="menu-item-name">Burger Clásico</div>
+                            <div class="menu-item-price">$8.99</div>
+                        </div>
+                    </div>
+                    <div class="menu-item">
+                        <img src="https://placehold.co/200x120/d97706/white?text=Doble" alt="Doble" class="menu-item-image">
+                        <div class="menu-item-info">
+                            <div class="menu-item-name">Doble Queso</div>
+                            <div class="menu-item-price">$12.99</div>
+                        </div>
+                    </div>
+                    <div class="menu-item">
+                        <img src="https://placehold.co/200x120/ec4899/white?text=Picante" alt="Picante" class="menu-item-image">
+                        <div class="menu-item-info">
+                            <div class="menu-item-name">Burger Picante</div>
+                            <div class="menu-item-price">$10.99</div>
+                        </div>
+                    </div>
+                    <div class="menu-item">
+                        <img src="https://placehold.co/200x120/0ea5e9/white?text=Bacon" alt="Bacon" class="menu-item-image">
+                        <div class="menu-item-info">
+                            <div class="menu-item-name">Bacon Supreme</div>
+                            <div class="menu-item-price">$13.99</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="menu-section">
+                <div class="section-title">Promociones</div>
+                <div class="menu-grid">
+                    <div class="menu-item">
+                        <img src="https://placehold.co/200x120/f59e0b/white?text=Combo" alt="Combo" class="menu-item-image">
+                        <div class="menu-item-info">
+                            <div class="menu-item-name">Combo 2 Burgers</div>
+                            <div class="menu-item-price">$16.99</div>
+                        </div>
+                    </div>
+                    <div class="menu-item">
+                        <img src="https://placehold.co/200x120/8b5cf6/white?text=Familia" alt="Familia" class="menu-item-image">
+                        <div class="menu-item-info">
+                            <div class="menu-item-name">Pack Familia</div>
+                            <div class="menu-item-price">$29.99</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bottom-nav">
+            <a href="#" class="nav-item active">
+                <div class="nav-icon">🏠</div>
+                <div>Inicio</div>
+            </a>
+            <a href="#" class="nav-item">
+                <div class="nav-icon">❤️</div>
+                <div>Favoritos</div>
+            </a>
+            <a href="#" class="nav-item">
+                <div class="nav-icon">🛒</div>
+                <div>Carrito</div>
+            </a>
+            <a href="#" class="nav-item">
+                <div class="nav-icon">👤</div>
+                <div>Perfil</div>
+            </a>
+        </div>
+    </div>
+
+    <!-- SCREEN 2: DETAIL -->
+    <div class="screen">
+        <div class="screen-content">
+            <img src="https://placehold.co/375x300/d97706/white?text=Hamburguesa+Especial" alt="Hamburguesa Especial" class="detail-image">
+            
+            <div class="detail-container">
+                <div class="detail-header">
+                    <div>
+                        <div class="detail-title">Hamburguesa Especial</div>
+                        <div class="detail-rating">⭐ 4.8 (124 reseñas)</div>
+                    </div>
+                </div>
+
+                <div class="detail-description">
+                    Hamburguesa premium con carne 100% de res, queso cheddar derretido, tocino crujiente, cebolla caramelizada y nuestra salsa especial en pan tostado artesanal.
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-section-title">Tamaño</div>
+                    <div class="size-options">
+                        <button class="size-btn">Pequeño</button>
+                        <button class="size-btn active">Regular</button>
+                        <button class="size-btn">Grande</button>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-section-title">Extras</div>
+                    <div class="extras">
+                        <div class="extra-item">
+                            <div class="extra-checkbox">✓</div>
+                            <span>Queso Extra</span>
+                        </div>
+                        <div class="extra-item">
+                            <div class="extra-checkbox"></div>
+                            <span>Bacon Extra</span>
+                        </div>
+                        <div class="extra-item selected">
+                            <div class="extra-checkbox">✓</div>
+                            <span>Cebolla</span>
+                        </div>
+                        <div class="extra-item">
+                            <div class="extra-checkbox"></div>
+                            <span>Jalapeños</span>
+                        </div>
+                        <div class="extra-item">
+                            <div class="extra-checkbox"></div>
+                            <span>Aguacate</span>
+                        </div>
+                        <div class="extra-item">
+                            <div class="extra-checkbox"></div>
+                            <span>Huevo</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="detail-price">$14.99</div>
+
+                <div class="detail-bottom">
+                    <div class="qty-selector">
+                        <button class="qty-btn">−</button>
+                        <div class="qty-display">1</div>
+                        <button class="qty-btn">+</button>
+                    </div>
+                    <button class="add-to-cart-btn">Agregar al carrito</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="bottom-nav">
+            <a href="#" class="nav-item active">
+                <div class="nav-icon">🏠</div>
+                <div>Inicio</div>
+            </a>
+            <a href="#" class="nav-item">
+                <div class="nav-icon">❤️</div>
+                <div>Favoritos</div>
+            </a>
+            <a href="#" class="nav-item">
+                <div class="nav-icon">🛒</div>
+                <div>Carrito</div>
+            </a>
+            <a href="#" class="nav-item">
+                <div class="nav-icon">👤</div>
+                <div>Perfil</div>
+            </a>
+        </div>
+    </div>
+
+    <!-- SCREEN 3: CART -->
+    <div class="screen">
+        <div class="screen-content">
+            <div class="cart-header">
+                <div class="cart-title">Mi Carrito</div>
+            </div>
+
+            <div class="cart-items">
+                <div class="cart-item">
+                    <img src="https://placehold.co/80x80/7C3AED/white?text=Burger" alt="Big Burger Queso" class="cart-item-image">
+                    <div class="cart-item-details">
+                        <div class="cart-item-name">Big Burger Queso</div>
+                        <div class="cart-item-extras">Queso extra, Cebolla</div>
+                        <div class="cart-item-price">$16.98</div>
+                    </div>
+                    <div class="cart-item-qty">
+                        <button class="cart-qty-btn">−</button>
+                        <div class="cart-qty-display">2</div>
+                        <button class="cart-qty-btn">+</button>
+                    </div>
+                </div>
+
+                <div class="cart-item">
+                    <img src="https://placehold.co/80x80/d97706/white?text=Bacon" alt="Bacon Supreme" class="cart-item-image">
+                    <div class="cart-item-details">
+                        <div class="cart-item-name">Bacon Supreme</div>
+                        <div class="cart-item-extras">Sin cebolla</div>
+                        <div class="cart-item-price">$13.99</div>
+                    </div>
+                    <div class="cart-item-qty">
+                        <button class="cart-qty-btn">−</button>
+                        <div class="cart-qty-display">1</div>
+                        <button class="cart-qty-btn">+</button>
+                    </div>
+                </div>
+
+                <div class="cart-item">
+                    <img src="https://placehold.co/80x80/ec4899/white?text=Combo" alt="Combo Bebida" class="cart-item-image">
+                    <div class="cart-item-details">
+                        <div class="cart-item-name">Combo Bebida</div>
+                        <div class="cart-item-extras">Refresco grande</div>
+                        <div class="cart-item-price">$8.99</div>
+                    </div>
+                    <div class="cart-item-qty">
+                        <button class="cart-qty-btn">−</button>
+                        <div class="cart-qty-display">1</div>
+                        <button class="cart-qty-btn">+</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="summary">
+                <div class="summary-row">
+                    <span class="summary-label">Subtotal</span>
+                    <span class="summary-value">$39.96</span>
+                </div>
+                <div class="summary-row">
+                    <span class="summary-label">Envío</span>
+                    <span class="summary-value">$5.00</span>
+                </div>
+                <div class="summary-row">
+                    <span class="summary-label">Impuestos</span>
+                    <span class="summary-value">$3.60</span>
+                </div>
+                <div class="summary-row total">
+                    <span class="summary-label">Total</span>
+                    <span class="summary-value">$48.56</span>
+                </div>
+                <button class="checkout-btn">Proceder al Pago</button>
+            </div>
+        </div>
+
+        <div class="bottom-nav">
+            <a href="#" class="nav-item">
+                <div class="nav-icon">🏠</div>
+                <div>Inicio</div>
+            </a>
+            <a href="#" class="nav-item">
+                <div class="nav-icon">❤️</div>
+                <div>Favoritos</div>
+            </a>
+            <a href="#" class="nav-item active">
+                <div class="nav-icon">🛒</div>
+                <div>Carrito</div>
+            </a>
+            <a href="#" class="nav-item">
+                <div class="nav-icon">👤</div>
+                <div>Perfil</div>
+            </a>
+        </div>
+    </div>
+</body>
+</html>
+```
