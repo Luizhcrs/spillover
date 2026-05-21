@@ -2,7 +2,7 @@
 
 Transparent LLM proxy with overflow memory architecture.
 
-**Status:** v0.1 (MVP foundation only — see `docs/superpowers/plans/` for roadmap).
+**Status:** v0.1 bootstrap — package skeleton only. The `spillover` CLI lands in a later task; the commands below are forward-looking and will not run yet. See `docs/superpowers/plans/` for the roadmap.
 
 ## Install
 
