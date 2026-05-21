@@ -134,6 +134,31 @@ The current test suite is **186 tests** across unit + integration, all passing. 
 
 Recall-on-real-task numbers are deliberately not published yet — the Plan 7 work (recall@5 dataset + offline A/B benchmark runner against a small local LLM) is the next milestone. The acceptance-gate dataset will live in this repo and be reproducible offline.
 
+## Run the A/B demo yourself
+
+After installing, run a side-by-side comparison against your real Anthropic
+account. Each task is a multi-turn conversation followed by a question that
+requires *remembering* the earlier turns.
+
+```bash
+# 1. start the proxy
+spillover up &
+
+# 2. run A/B (uses OAuth from ~/.claude/.credentials.json if no ANTHROPIC_API_KEY)
+spillover bench \
+  --tasks src/spillover/bench/tasks_sample.jsonl \
+  --report bench-report.md \
+  --run
+
+cat bench-report.md
+```
+
+You will see two rows per task: `vanilla` (history sent inline) and `spillover` (only the question sent -- history must be recalled via LTM). The report counts:
+
+- how many tasks each mode answered with all the expected anchor strings present
+- total tokens spent on each mode
+- per-task latency
+
 ## What is in the box
 
 - **Local-only.** SQLite + `sqlite-vec` for the vector store, [Kuzu](https://kuzudb.com/) for the property graph, [`fastembed`](https://github.com/qdrant/fastembed) with `nomic-embed-text-v1.5-Q` for embeddings. Zero cloud calls for memory, zero per-MB cost.
