@@ -164,15 +164,70 @@ def _retrieve_ltm_block(
 
 
 def _inject_ltm(payload: dict, ltm_text: str) -> None:
+    """Inject LTM text. Placement controlled by SPILLOVER_LTM_PLACEMENT:
+
+    - 'turns' (default): materialise the LTM block as a synthetic
+      user→assistant pair INSERTED BEFORE the latest user turn. Models read
+      this as real prior conversation and cite it like they cite history.
+    - 'user': prepend the LTM markdown block to the LAST user message.
+    - 'system': prepend the LTM markdown block to the system field
+      (legacy; smaller models tend to ignore it).
+    """
     if not ltm_text:
         return
-    existing = payload.get("system")
-    if existing is None:
+    import os
+
+    placement = os.environ.get("SPILLOVER_LTM_PLACEMENT", "turns")
+    if placement == "system":
+        existing = payload.get("system")
+        if existing is None:
+            payload["system"] = ltm_text
+        elif isinstance(existing, str):
+            payload["system"] = ltm_text + "\n\n" + existing
+        elif isinstance(existing, list):
+            payload["system"] = [{"type": "text", "text": ltm_text}, *existing]
+        return
+
+    if placement == "user":
+        messages = payload.get("messages") or []
+        for msg in reversed(messages):
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if isinstance(content, str):
+                msg["content"] = ltm_text + "\n\n" + content
+            elif isinstance(content, list):
+                msg["content"] = [{"type": "text", "text": ltm_text}, *content]
+            else:
+                msg["content"] = ltm_text
+            return
         payload["system"] = ltm_text
-    elif isinstance(existing, str):
-        payload["system"] = ltm_text + "\n\n" + existing
-    elif isinstance(existing, list):
-        payload["system"] = [{"type": "text", "text": ltm_text}, *existing]
+        return
+
+    # placement == "turns" — materialise as a synthetic conversation pair
+    messages = payload.get("messages") or []
+    if not messages:
+        payload["system"] = ltm_text
+        return
+    # Find the index of the FIRST user message and inject before it
+    insert_at = 0
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "user":
+            insert_at = i
+            break
+    synthetic = [
+        {
+            "role": "user",
+            "content": (
+                "Before we continue: recall the following from our prior work "
+                "on this project, retrieved from long-term memory."
+            ),
+        },
+        {"role": "assistant", "content": ltm_text},
+    ]
+    payload["messages"] = (
+        list(messages[:insert_at]) + synthetic + list(messages[insert_at:])
+    )
 
 
 def _maybe_evict(
