@@ -101,10 +101,14 @@ This is **persistent cognition**, not a chatbot with a bigger window.
    - embedding (fastembed `nomic-embed-text-v1.5-Q`)
    - NER (spaCy lite + regex)
    - decisions / code_refs / tool_calls extractor
-   - 4-way classifier (procedural / episodic / semantic / emotional)
+   - 4-way classifier (procedural / episodic / semantic / priority)
+     - **procedural**: how-to (tool sequences, command patterns, code recipes)
+     - **episodic**: what happened (turns, decisions, failures, successes)
+     - **semantic**: abstract knowledge (project conventions, domain facts)
+     - **priority**: flagged as load-bearing (user said "remember this", repeated mistakes, blocking bugs). Replaces "emotional" — no affective component in coding agents; signals weight/urgency only.
    - writes to sqlite-vec + Kuzu (nodes + edges)
 
-8. **decay scheduler** — cron every 6h. Adjusts `importance = base * exp(-age/half_life) + min(hit_count*0.05, 0.5)`. Half-life by type: procedural 30d, semantic 14d, episodic 7d, emotional 60d. Pinned skip decay.
+8. **decay scheduler** — cron every 6h. Adjusts `importance = base * exp(-age/half_life) + min(hit_count*0.05, 0.5)`. Half-life by type: procedural 30d, semantic 14d, episodic 7d, priority 60d. Pinned skip decay.
 
 ### 4.2 Final input payload to LLM
 
@@ -139,7 +143,7 @@ Auto-compaction is a client-side decision. Spillover must neutralize it.
 | 3. fake window size | Inject larger context-window value in response header so CLI fraction-based heuristics never fire | opt-in per CLI |
 | 4. intercept /compact | Detect explicit compaction tool calls, ack without forwarding | active when pattern known |
 
-If the CLI compacts anyway, spillover detects via conversation diff (turn N has msgs A,B,C; turn N+1 has summary). Marks `compaction_detected`, rescues raw as episodes `rescued_from_compaction`, re-injects via next LTM block, alerts user.
+If the CLI compacts anyway, spillover detects via conversation diff. Proxy stores per-project the SHA of every assistant turn it has seen (`seen_turns` table: `project_id, turn_hash, ts, content_json`). On each new request, the inbound conversation's prior assistant messages are hashed in order — if a sequence A,B,C from turn N is replaced by a single shorter "summary" message in turn N+1, the diff flags it. Spillover marks `compaction_detected`, restores rows A,B,C from `seen_turns` as episodes with `rescued_from_compaction=1`, re-injects via the next LTM block, alerts user.
 
 ## 6. Data flow
 
@@ -182,7 +186,7 @@ For each `episode_id`:
 - entities = ner(content)
 - decisions = decision_parser(content)
 - code_refs = code_ref_parser(tool_calls_json)
-- memory_type = classifier(content, tool_calls) → {procedural | episodic | semantic | emotional}
+- memory_type = classifier(content, tool_calls) → {procedural | episodic | semantic | priority}
 - importance = base_score(type, entities_count, decisions_count, tool_calls_count)
 - writes:
   - sqlite-vec row: `vec_episodes(episode_id, embedding, type, importance, ts)`
@@ -223,7 +227,22 @@ When retriever includes an episode in top-K and the next assistant response refe
 | `hit_count` | INTEGER | default 0 |
 | `compaction_rescued` | INTEGER | 0/1 |
 
-### 7.2 sqlite-vec — `vec_episodes`
+### 7.2 SQLite — `seen_turns` (per project, counter-compaction support)
+
+Stores every assistant turn the proxy has observed inbound, used to diff against subsequent requests to detect client-side compaction.
+
+| col | type | notes |
+|------|------|------|
+| `project_id` | TEXT | |
+| `turn_index` | INTEGER | position in conversation when first seen |
+| `turn_hash` | TEXT PK | sha256 of normalized content |
+| `content_json` | TEXT | raw assistant message |
+| `first_seen_ts` | INTEGER | |
+| `last_seen_ts` | INTEGER | updated each request still containing this turn |
+
+Retention: rows pruned when the turn has not appeared in any inbound conversation for `compaction_diff_ttl_hours` (default 72).
+
+### 7.3 sqlite-vec — `vec_episodes`
 
 | col | type |
 |------|------|
@@ -233,7 +252,7 @@ When retriever includes an episode in top-K and the next assistant response refe
 | `importance` | REAL |
 | `ts` | INTEGER |
 
-### 7.3 Kuzu graph (per project)
+### 7.4 Kuzu graph (per project)
 
 Nodes:
 
@@ -286,7 +305,7 @@ Structured JSON logs to stderr. Keys: `event`, `project`, `episode_id`, `latency
 
 CLI utilities:
 
-- `spillover up [--project DIR]` — start proxy with project bound
+- `spillover up [--port 8787]` — start the proxy daemon. Projects are routed via `X-Project` header; the daemon is project-agnostic and opens per-project DB handles on demand.
 - `spillover stats <project>` — episode counts by type, top entities, top files, importance distribution, overflow timeline
 - `spillover query <project> "..."` — ad-hoc retriever, show ranking + scores
 - `spillover trace <request_id>` — replay pipeline for debugging
@@ -328,7 +347,7 @@ Three tiers:
 |------|------:|
 | Hot path overhead p50 | < 80ms |
 | Hot path overhead p99 | < 200ms |
-| Retriever query p99 | < 60ms |
+| Retriever query p99 | < 80ms |
 | Archive durability | < 50ms |
 | Facet pipeline throughput | >= 5 episodes/s single-worker |
 | DB size per project per month (heavy use) | <= 100MB |
