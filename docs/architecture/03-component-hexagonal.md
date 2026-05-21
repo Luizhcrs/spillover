@@ -35,7 +35,7 @@ graph TB
         seen[("SeenTurnRepo<br/>SQLite<br/>tabela seen_turns")]:::outbound
         vec[("VectorIndex<br/>sqlite-vec<br/>vec_episodes")]:::outbound
         fts[("LexicalIndex<br/>SQLite FTS5<br/>episodes_fts<br/>tokenchars dot slash underscore dash colon")]:::outbound
-        graph[("GraphIndex<br/>Kuzu<br/>cache LRU 32")]:::outbound
+        graphidx[("GraphIndex<br/>Kuzu<br/>cache LRU 32")]:::outbound
         embed["Embedder<br/>fastembed<br/>nomic-embed-text-v1.5-Q"]:::outbound
         anth["AnthropicClient<br/>adapters/anthropic.py<br/>+ httpx + retry"]:::outbound
         oai["OpenAIClient<br/>adapters/openai.py<br/>+ httpx + retry"]:::outbound
@@ -56,7 +56,7 @@ graph TB
     handle --> seen
     handle --> vec
     handle --> fts
-    handle --> graph
+    handle --> graphidx
     handle --> embed
     handle --> tok
     handle --> anth
@@ -68,7 +68,7 @@ graph TB
     facet_uc --> repo
     facet_uc --> vec
     facet_uc --> fts
-    facet_uc --> graph
+    facet_uc --> graphidx
     facet_uc --> embed
 
     decay_uc --> policies
