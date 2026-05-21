@@ -1,31 +1,31 @@
-# 08 — Counter-compaction: 4-vector defense
+# 08 — Counter-compaction: defesa em 4 vetores
 
-CLIs auto-compact when they perceive context pressure. Spillover applies four independent defenses so the conversation never gets summarised, no matter which trigger the CLI tries.
+CLIs auto-compactam quando percebem pressao de contexto. spillover aplica 4 defesas independentes pra que a conversa nunca seja resumida, importa qual trigger o CLI tentar.
 
 ```mermaid
 flowchart TB
     classDef vec fill:#c62828,stroke:#fff,color:#fff
     classDef impl fill:#1565c0,stroke:#fff,color:#fff
 
-    subgraph V1["Vector 1: Usage Rewrite"]
-        V1A["After provider response<br/>real_input_tokens = 22541"]:::vec
-        V1B["Subtract tokens_archived<br/>(this turn's eviction)<br/>= 22320 visible"]:::impl
-        V1C["Client receives spoofed<br/>usage.input_tokens = 22320<br/>+ spillover_real_input_tokens = 22541<br/>(audit field)"]:::impl
+    subgraph V1["Vetor 1: Usage Rewrite"]
+        V1A["Apos resposta do provider<br/>real_input_tokens = 22541"]:::vec
+        V1B["Subtrai tokens_archived<br/>(eviction deste turno)<br/>= 22320 visivel"]:::impl
+        V1C["Cliente recebe usage spoofado<br/>usage.input_tokens = 22320<br/>+ spillover_real_input_tokens = 22541<br/>(campo de auditoria)"]:::impl
     end
 
-    subgraph V2["Vector 2: Env-var Disable"]
-        V2A["Wrapper spawns CLI with:<br/>CLAUDE_CODE_AUTO_COMPACT=0<br/>CLAUDE_CODE_DISABLE_COMPACT=1<br/>CLAUDE_CODE_DISABLE_AUTO_COMPACT=1<br/>(plus codex/cursor equivalents)"]:::vec
+    subgraph V2["Vetor 2: Disable via env-var"]
+        V2A["Wrapper spawna CLI com:<br/>CLAUDE_CODE_AUTO_COMPACT=0<br/>CLAUDE_CODE_DISABLE_COMPACT=1<br/>CLAUDE_CODE_DISABLE_AUTO_COMPACT=1<br/>(mais equivalentes codex/cursor)"]:::vec
     end
 
-    subgraph V3["Vector 3: Diff + Rescue"]
-        V3A["On every inbound request,<br/>hash each assistant turn"]:::vec
-        V3B["Compare against seen_turns table<br/>(per project, sha256 sorted)"]:::impl
-        V3C["If turns disappeared<br/>(client compacted anyway):<br/>archive as compaction_rescued=1,<br/>enqueue facets,<br/>re-inject in next LTM block"]:::impl
+    subgraph V3["Vetor 3: Diff + Resgate"]
+        V3A["A cada request inbound,<br/>hashea cada turno assistente"]:::vec
+        V3B["Compara contra tabela seen_turns<br/>(por projeto, sha256 ordenado)"]:::impl
+        V3C["Se turnos sumiram<br/>(cliente compactou anyway):<br/>archive como compaction_rescued=1,<br/>enfileira facets,<br/>reinjeta no proximo LTM block"]:::impl
     end
 
-    subgraph V4["Vector 4: Intercept"]
-        V4A["should_intercept_request<br/>pattern match against<br/>known compaction prompts<br/>(EN + PT-BR)"]:::vec
-        V4B["If match: return synthetic<br/>200 with stub assistant text<br/>WITHOUT forwarding to provider"]:::impl
+    subgraph V4["Vetor 4: Intercept"]
+        V4A["should_intercept_request<br/>pattern match contra<br/>prompts conhecidos de compaction<br/>(EN + PT-BR)"]:::vec
+        V4B["Se bate: retorna 200 sintetico<br/>com texto assistant stub<br/>SEM encaminhar pro provider"]:::impl
     end
 
     V1A --> V1B --> V1C
@@ -34,46 +34,46 @@ flowchart TB
     V4A --> V4B
 ```
 
-## Vector 1 — usage rewrite
+## Vetor 1 — usage rewrite
 
-**Where:** every response.
-**How:** subtract `tokens_archived_this_turn` from `usage.input_tokens` before returning to client. Original number preserved as `spillover_real_input_tokens`.
+**Onde:** toda resposta.
+**Como:** subtrai `tokens_archived_this_turn` do `usage.input_tokens` antes de retornar pro cliente. Numero original preservado em `spillover_real_input_tokens`.
 
-Streaming variant: the SSE rewrite waits for the `message_stop` / `message_delta` chunk, rewrites its `usage` field, emits the rewritten chunk last. Content chunks stream live; only the usage chunk is buffered.
+Variante streaming: o SSE rewrite espera o chunk `message_stop` / `message_delta`, reescreve seu campo `usage`, emite o chunk reescrito por ultimo. Chunks de conteudo passam vivos; soh o chunk com usage e buffered.
 
 ```python
 visible.input_tokens = real.input_tokens - tokens_archived_this_turn
 visible.spillover_real_input_tokens = real.input_tokens
 ```
 
-**Effect:** client believes its context budget is healthier than reality. Auto-compact threshold (e.g. 80% of window) is never crossed.
+**Efeito:** cliente acredita que seu budget de contexto esta mais saudavel que a realidade. Threshold de auto-compact (ex: 80% da janela) nunca cruzado.
 
-## Vector 2 — env-var disable
+## Vetor 2 — disable via env-var
 
-**Where:** the wrapper script (`spillover-cc`, `spillover-codex`, etc).
-**How:** sets known CLI flags via env vars before spawning the target CLI.
+**Onde:** script wrapper (`spillover-cc`, `spillover-codex`, etc).
+**Como:** seta flags conhecidas via env vars antes de lancar o CLI alvo.
 
-Known patterns:
+Patterns conhecidos:
 
-| CLI | env vars set |
+| CLI | env vars setadas |
 |---|---|
 | Claude Code | `CLAUDE_CODE_AUTO_COMPACT=0`, `CLAUDE_CODE_DISABLE_COMPACT=1`, `CLAUDE_CODE_DISABLE_AUTO_COMPACT=1` |
 | Codex | `CODEX_AUTO_COMPACT=0`, `CODEX_DISABLE_COMPACT=1` |
-| Cursor | (Cursor-specific flags TBD; defaults to relying on V1) |
-| Continue.dev | (per-extension config; defaults to relying on V1) |
+| Cursor | (flags Cursor-specific TBD; default cai em V1) |
+| Continue.dev | (config por extensao; default cai em V1) |
 
-**Effect:** CLIs that respect these env vars skip compaction entirely.
+**Efeito:** CLIs que respeitam essas env vars pulam compaction inteiro.
 
-## Vector 3 — conversation diff + rescue
+## Vetor 3 — diff de conversa + resgate
 
-**Where:** every inbound request.
-**How:**
+**Onde:** toda request inbound.
+**Como:**
 
-1. Hash every `role=assistant` message in the inbound `messages[]`.
-2. Compare against the `seen_turns` table (per project, sha256-keyed).
-3. If turns we previously saw are now missing → client compacted them away.
-4. Restore the missing content from `seen_turns.content_json`, archive as `compaction_rescued=1`, enqueue facets so they're indexed.
-5. The next LTM block includes them via normal retrieval; the agent reads its rescued statements back.
+1. Hashea toda mensagem `role=assistant` no `messages[]` inbound.
+2. Compara contra tabela `seen_turns` (por projeto, sha256-keyed).
+3. Se turnos que vimos antes estao sumidos → cliente compactou eles.
+4. Restaura o conteudo perdido do `seen_turns.content_json`, archive como `compaction_rescued=1`, enfileira facets pra que sejam indexados.
+5. Proximo LTM block inclui eles via retrieval normal; agente le suas falas resgatadas de volta.
 
 ```python
 seen_hashes = {hash(t) for t in seen_turns_for(project_id)}
@@ -84,12 +84,12 @@ for m in resolve_from_seen_turns(missing):
     enqueue_facet(m.id)
 ```
 
-**Effect:** even if V1 + V2 fail and the CLI compacts anyway, the lost turns are recovered automatically on the next request. No data loss in practice.
+**Efeito:** mesmo se V1 + V2 falharem e o CLI compactar anyway, os turnos perdidos sao recuperados automaticamente na proxima request. Sem perda de dado na pratica.
 
-## Vector 4 — explicit intercept
+## Vetor 4 — intercept explicito
 
-**Where:** every inbound request, before any retrieval or forwarding.
-**How:** pattern match against compaction prompts in English and Portuguese.
+**Onde:** toda request inbound, antes de qualquer retrieval ou forwarding.
+**Como:** pattern match contra prompts de compaction em ingles e portugues.
 
 ```python
 patterns = [
@@ -102,27 +102,27 @@ patterns = [
 ]
 ```
 
-If the inbound prompt looks like a compaction request, spillover **does not forward**. It returns a synthetic 200 with a generic assistant response (`"Conversation context preserved by spillover; no compaction needed."`). The CLI thinks the request succeeded; spillover saved the call.
+Se o prompt inbound parece request de compaction, spillover **nao encaminha**. Retorna 200 sintetico com resposta generica de assistant (`"Conversation context preserved by spillover; no compaction needed."`). CLI acha que a request deu certo; spillover salvou a chamada.
 
-**Effect:** explicit compaction commands are neutralised; no provider tokens spent.
+**Efeito:** comandos explicitos de compaction sao neutralizados; zero token gasto no provider.
 
-## Defense ordering
+## Ordenacao das defesas
 
-Each vector is independent and stacks:
+Cada vetor e independente e empilha:
 
-1. V2 (env disable) — most preventive; CLI never tries to compact.
-2. V4 (intercept) — catches manual `/compact` invocations regardless of env vars.
-3. V1 (usage rewrite) — covers automatic threshold-driven compaction.
-4. V3 (rescue) — last-resort recovery if everything else failed.
+1. V2 (disable via env) — mais preventivo; CLI nunca tenta compactar.
+2. V4 (intercept) — pega invocacoes manuais de `/compact` independente de env vars.
+3. V1 (usage rewrite) — cobre compaction automatica por threshold.
+4. V3 (rescue) — recuperacao de ultimo recurso se tudo o mais falhou.
 
-In production heavy-bench traffic, V1 + V3 carried the load:
+No trafego heavy-bench em producao, V1 + V3 carregaram a carga:
 
-| metric | value |
+| metrica | valor |
 |---|---:|
-| compaction_detected_total | 1 (rescued 6 turns in one round) |
+| compaction_detected_total | 1 (resgatou 6 turnos numa rodada) |
 | episodes_archived_total{type="rescued"} | 6 |
-| usage rewrite applied | every response (visible = real − archived) |
+| usage rewrite aplicado | toda resposta (visible = real − archived) |
 
-## Auditability
+## Auditabilidade
 
-V1's `spillover_real_input_tokens` audit field on the response usage block lets any downstream observer reconcile real cost. V3's `compaction_rescued=1` flag on `episodes` distinguishes rescued content from naturally-evicted content. V4's intercepted requests don't reach the provider but do increment `requests_total{provider="anthropic", status="200"}` with a `spillover_intercepted=true` field on the body for traceability.
+Campo de auditoria `spillover_real_input_tokens` do V1 no usage block da resposta permite que qualquer observer downstream reconcilie custo real. Flag `compaction_rescued=1` do V3 em `episodes` distingue conteudo resgatado de conteudo evictado natural. Requests interceptadas do V4 nao chegam no provider mas incrementam `requests_total{provider="anthropic", status="200"}` com campo `spillover_intercepted=true` no body pra rastreabilidade.

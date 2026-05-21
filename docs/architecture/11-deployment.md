@@ -1,6 +1,6 @@
-# 11 — Deployment topology
+# 11 — Topologia de Deploy
 
-Spillover is a workstation-local system. The entire memory layer runs on the developer's machine; the only cloud dependencies are the LLM provider APIs themselves.
+spillover e um sistema workstation-local. Toda a camada de memoria roda na maquina do dev; as unicas dependencias de cloud sao as APIs dos providers LLM em si.
 
 ```mermaid
 graph TB
@@ -8,10 +8,10 @@ graph TB
     classDef proc fill:#388e3c,stroke:#fff,color:#fff
     classDef ext fill:#5e35b1,stroke:#fff,color:#fff
 
-    subgraph Workstation["Developer Workstation (local)"]
-        IDE["Claude Code / Codex /<br/>Cursor / Continue<br/>IDE-embedded CLI"]:::dev
-        WrapProc["Wrapper Process<br/>spillover-cc / -codex /<br/>-cursor / -continue<br/>(short-lived shim)"]:::proc
-        ProxyProc["Proxy Daemon<br/>spillover up<br/>:8787<br/>(long-running)"]:::proc
+    subgraph Workstation["Workstation do Dev (local)"]
+        IDE["Claude Code / Codex /<br/>Cursor / Continue<br/>CLI embedded na IDE"]:::dev
+        WrapProc["Processo Wrapper<br/>spillover-cc / -codex /<br/>-cursor / -continue<br/>(shim curto)"]:::proc
+        ProxyProc["Daemon do Proxy<br/>spillover up<br/>:8787<br/>(long-running)"]:::proc
 
         subgraph Storage["~/.spillover/"]
             P1["projects/&lt;sha1_cwd_A&gt;/<br/>episodes.db<br/>kuzu/"]:::dev
@@ -19,37 +19,37 @@ graph TB
             P3["projects/&lt;sha1_cwd_C&gt;/<br/>episodes.db<br/>kuzu/"]:::dev
         end
 
-        FECache["~/.cache/fastembed/<br/>nomic-embed-text-v1.5-Q.onnx<br/>(shared across projects)"]:::dev
+        FECache["~/.cache/fastembed/<br/>nomic-embed-text-v1.5-Q.onnx<br/>(compartilhado entre projetos)"]:::dev
     end
 
-    subgraph CloudAnthropic["Anthropic Cloud"]
+    subgraph CloudAnthropic["Cloud Anthropic"]
         AAPI["api.anthropic.com<br/>/v1/messages"]:::ext
     end
 
-    subgraph CloudOpenAI["OpenAI Cloud"]
+    subgraph CloudOpenAI["Cloud OpenAI"]
         OAPI["api.openai.com<br/>/v1/chat/completions"]:::ext
     end
 
-    IDE -->|spawn| WrapProc
+    IDE -->|spawna| WrapProc
     WrapProc -->|"ANTHROPIC_BASE_URL=<br/>http://127.0.0.1:8787/p/&lt;sha1&gt;"| IDE
     IDE -.->|HTTP loopback| ProxyProc
     ProxyProc --> P1
     ProxyProc --> P2
     ProxyProc --> P3
     ProxyProc --> FECache
-    ProxyProc -->|HTTPS<br/>OAuth Bearer or<br/>sk-ant API key| AAPI
+    ProxyProc -->|HTTPS<br/>OAuth Bearer ou<br/>API key sk-ant| AAPI
     ProxyProc -->|HTTPS| OAPI
 ```
 
-## Process lifetimes
+## Tempos de vida dos processos
 
-| process | lifetime | start command |
+| processo | tempo de vida | comando de start |
 |---|---|---|
-| Proxy Daemon | long-running, one per workstation | `spillover up` (foreground) or `nohup spillover up &` (background) |
-| Wrapper | short — spawns target CLI then waits | `spillover-cc`, `spillover-codex`, etc |
-| Target CLI | as long as the developer needs it | spawned by wrapper, inherits env |
+| Daemon do Proxy | long-running, um por workstation | `spillover up` (foreground) ou `nohup spillover up &` (background) |
+| Wrapper | curto — spawna o CLI alvo entao espera | `spillover-cc`, `spillover-codex`, etc |
+| CLI alvo | enquanto o dev precisar | spawned pelo wrapper, herda env |
 
-## Filesystem layout
+## Layout do filesystem
 
 ```
 ~/.spillover/
@@ -63,65 +63,65 @@ graph TB
     └── …
 
 ~/.cache/fastembed/
-└── nomic-embed-text-v1.5-Q.onnx   (~130 MB, shared)
+└── nomic-embed-text-v1.5-Q.onnx   (~130 MB, compartilhado)
 ```
 
-## Port + network
+## Porta + rede
 
-- Proxy listens on `127.0.0.1:8787` by default (loopback only — never exposed to the network).
-- Outbound HTTPS to `api.anthropic.com` and `api.openai.com`.
-- No inbound from anything except the developer's own CLIs.
+- Proxy escuta em `127.0.0.1:8787` por default (loopback soh — nunca exposto na rede).
+- HTTPS outbound pra `api.anthropic.com` e `api.openai.com`.
+- Sem inbound de nada exceto os CLIs do proprio dev.
 
-## Auth flow
+## Fluxo de auth
 
 ```
-Developer's existing CLI auth (OAuth Bearer or sk-ant- API key)
+Auth existente do CLI do dev (Bearer OAuth ou API key sk-ant-)
        ↓
-Wrapper sets ANTHROPIC_BASE_URL, leaves Authorization header alone
+Wrapper seta ANTHROPIC_BASE_URL, deixa o header Authorization sozinho
        ↓
-CLI makes request with Authorization: Bearer <token>
+CLI faz request com Authorization: Bearer <token>
        ↓
-Proxy forwards the header verbatim to Anthropic/OpenAI
+Proxy encaminha o header verbatim pra Anthropic/OpenAI
 ```
 
-Spillover never sees or stores the API key beyond the request lifetime. Header logging is redacted via `spillover.logging.redact()`.
+spillover nunca ve ou armazena a API key alem do tempo de vida da request. Logging de header e redacted via `spillover.logging.redact()`.
 
-## Resource budget (per workstation)
+## Budget de recurso (por workstation)
 
-| resource | typical |
+| recurso | tipico |
 |---|---|
-| Memory (proxy) | ~200 MB (FastAPI + asyncio + fastembed loaded) |
-| Memory (per project DB) | ~5 MB resident |
-| Disk (projects) | linear with archives — ~100 KB per archived turn typical |
-| Disk (fastembed cache) | ~130 MB one-time |
-| CPU | idle most of the time; spikes during embed (~50 ms per turn on CPU, faster on GPU) |
-| Network | passthrough; no extra latency beyond proxy parsing (~50 ms typical) |
+| Memoria (proxy) | ~200 MB (FastAPI + asyncio + fastembed carregado) |
+| Memoria (por DB de projeto) | ~5 MB residente |
+| Disco (projetos) | linear nos archives — ~100 KB por turno arquivado tipico |
+| Disco (cache fastembed) | ~130 MB uma vez |
+| CPU | idle a maior parte do tempo; spikes durante embed (~50 ms por turno em CPU, mais rapido em GPU) |
+| Rede | passthrough; sem latencia extra alem do parse do proxy (~50 ms tipico) |
 
-## Scaling beyond one workstation
+## Escalando alem de uma workstation
 
-Current shape is single-machine. Multi-tenant SaaS deployment would require:
+Forma atual e single-machine. Deploy multi-tenant SaaS exigiria:
 
-1. Consolidating per-project SQLite files into a tenant-scoped DB (schema already carries `project_id`).
-2. Moving fastembed inference to a shared service (or accepting per-tenant cold start).
-3. Replacing the `loopback only` binding with a proper auth gateway.
-4. Adding rate limits per tenant (today: none; relies on Anthropic's rate limits transitively).
+1. Consolidar arquivos SQLite por-projeto num DB escopado por tenant (schema ja carrega `project_id`).
+2. Mover inferencia fastembed pra servico compartilhado (ou aceitar cold start por tenant).
+3. Trocar o binding `loopback only` por um gateway de auth proper.
+4. Adicionar rate limits por tenant (hoje: nenhum; depende dos rate limits da Anthropic transitivamente).
 
-See `docs/superpowers/plans/` for the candidate roadmap items.
+Ver `docs/superpowers/plans/` pra itens candidatos no roadmap.
 
-## Failure isolation
+## Isolamento de falha
 
-| failure | blast radius |
+| falha | blast radius |
 |---|---|
-| One project DB corrupted | only that project; others untouched |
-| Proxy crash | all active CLIs see connection refused until restart; no data loss (SQLite WAL durable) |
-| Fastembed model corrupted | retrieval degrades gracefully (LTM block becomes empty); proxy still forwards |
-| Anthropic outage | proxy returns 5xx after retry; eviction skipped for that turn |
+| DB de um projeto corrompido | so esse projeto; outros intocados |
+| Crash do proxy | todos CLIs ativos veem connection refused ate restart; sem perda de dado (SQLite WAL durable) |
+| Modelo fastembed corrompido | retrieval degrada gracefully (LTM block vira vazio); proxy ainda encaminha |
+| Outage da Anthropic | proxy retorna 5xx depois de retry; eviction skippado naquele turno |
 
-## Observability stack
+## Stack de observabilidade
 
-- Logs: stderr in structured Python `logging` format, with header redaction.
-- Metrics: `GET http://127.0.0.1:8787/metrics` (Prometheus text format).
+- Logs: stderr em formato `logging` Python estruturado, com header redaction.
+- Metricas: `GET http://127.0.0.1:8787/metrics` (formato texto Prometheus).
 - Health: `GET http://127.0.0.1:8787/health` → `{"status": "ok", "version": "1.6.1"}`.
-- CLI: `spillover stats <project>` → episodes / evicted / pinned / embedded / facet_pending counts.
+- CLI: `spillover stats <project>` → contadores episodes / evicted / pinned / embedded / facet_pending.
 
-No external dependency required for any of these.
+Nenhuma dependencia externa necessaria pra nenhum disso.

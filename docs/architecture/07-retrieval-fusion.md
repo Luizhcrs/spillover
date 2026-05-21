@@ -1,6 +1,6 @@
-# 07 — Retrieval: 4-leg hybrid fusion
+# 07 — Retrieval: fusion hibrido 4-pernas
 
-For every inbound request, spillover queries four parallel retrieval legs and fuses them via Reciprocal Rank Fusion before deciding what to inject as long-term memory.
+Pra cada request inbound, spillover consulta 4 pernas paralelas de retrieval e funde via Reciprocal Rank Fusion antes de decidir o que injetar como memoria de longo prazo.
 
 ```mermaid
 flowchart LR
@@ -9,20 +9,20 @@ flowchart LR
     classDef proc fill:#d84315,stroke:#fff,color:#fff
     classDef out fill:#0277bd,stroke:#fff,color:#fff
 
-    Q["Query text<br/>(last 3 conv turns)"]:::in
+    Q["Texto da query<br/>(ultimos 3 turnos da conv)"]:::in
 
-    EMB["embed_text<br/>fastembed<br/>nomic-embed-text-v1.5-Q<br/>→ 768-dim vector"]:::proc
-    ENT["extract_entities<br/>file/url/identifier/<br/>command regex<br/>→ seeds"]:::proc
+    EMB["embed_text<br/>fastembed<br/>nomic-embed-text-v1.5-Q<br/>→ vetor 768-dim"]:::proc
+    ENT["extract_entities<br/>regex file/url/identifier/<br/>command<br/>→ seeds"]:::proc
 
     V["VectorIndex<br/>sqlite-vec MATCH<br/>top-K=50"]:::leg
     G["GraphIndex<br/>Kuzu k-hop MENTIONS<br/>k=2, limit 50"]:::leg
     B["LexicalIndex<br/>SQLite FTS5 BM25<br/>tokenchars ./_-:"]:::leg
-    C["CausalityChain<br/>Kuzu AFTER walk<br/>depth=2 from BM25/vector seeds"]:::leg
+    C["CausalityChain<br/>Kuzu walk AFTER<br/>depth=2 a partir de seeds BM25/vector"]:::leg
 
-    R["RRF Fusion<br/>weight_type / (60 + rank)<br/>summed across legs<br/><br/>type_weights:<br/>priority 1.5<br/>task 1.4<br/>procedural 1.2<br/>episodic 1.0<br/>semantic 1.0"]:::proc
+    R["Fusion RRF<br/>weight_type / (60 + rank)<br/>somado entre pernas<br/><br/>type_weights:<br/>priority 1.5<br/>task 1.4<br/>procedural 1.2<br/>episodic 1.0<br/>semantic 1.0"]:::proc
 
-    TB["trim_to_budget<br/>(LTM budget =<br/>ceiling × ltm_pct)<br/>batch SELECT tokens"]:::proc
-    RD["render_ltm_block<br/>&lt;spillover-ltm&gt; framing<br/>+ per-episode XML tags"]:::proc
+    TB["trim_to_budget<br/>(LTM budget =<br/>ceiling × ltm_pct)<br/>SELECT batch de tokens"]:::proc
+    RD["render_ltm_block<br/>framing &lt;spillover-ltm&gt;<br/>+ tags XML por episodio"]:::proc
 
     INJ["inject_ltm<br/>placement:<br/>between (default)<br/>turns / user / system"]:::out
 
@@ -42,16 +42,16 @@ flowchart LR
     RD --> INJ
 ```
 
-## The four legs
+## As 4 pernas
 
-| leg | tech | strength | weakness |
+| perna | tech | forca | fraqueza |
 |---|---|---|---|
-| Vector | sqlite-vec cosine | semantic similarity ("auth bug" matches "jwt expiry") | smears short content; weak on exact identifiers |
-| Graph | Kuzu k-hop MENTIONS | retrieves episodes that share a named entity | empty if entity extraction produced no seeds |
-| Lexical (BM25) | SQLite FTS5 | exact-match for identifiers, file paths, numbers (`middleware.py:42`, `0.85`, `letsencryptresolver`) | misses paraphrased content |
-| Causal | Kuzu AFTER edges | "what happened around this episode" via temporal chain | only valuable at >50 episodes per project |
+| Vector | cosine sqlite-vec | similaridade semantica ("auth bug" bate com "jwt expiry") | borra conteudo curto; fraco em identificadores exatos |
+| Graph | Kuzu k-hop MENTIONS | retrieve de episodios que compartilham uma entidade nomeada | vazio se extracao de entidades nao produziu seeds |
+| Lexical (BM25) | SQLite FTS5 | match exato pra identificadores, file paths, numeros (`middleware.py:42`, `0.85`, `letsencryptresolver`) | erra conteudo parafraseado |
+| Causal | edges Kuzu AFTER | "o que aconteceu em volta deste episodio" via cadeia temporal | so vale com >50 episodios por projeto |
 
-## RRF parameters
+## Parametros do RRF
 
 ```
 DEFAULT_TYPE_WEIGHTS = {
@@ -65,10 +65,10 @@ RRF_K = 60
 ```
 
 ```
-score(episode) = sum_over_legs( type_weight / (RRF_K + rank_in_leg) )
+score(episodio) = sum_por_perna( type_weight / (RRF_K + rank_na_perna) )
 ```
 
-## Budget trim
+## Trim por budget
 
 ```
 LTM_budget = operational_ceiling_tokens × ltm_pct(profile)
@@ -81,9 +81,9 @@ LTM_budget = operational_ceiling_tokens × ltm_pct(profile)
 | conversation | 0.10 |
 | default | 0.15 |
 
-Profile auto-detected from inbound payload signals (tool count, message count, system markers).
+Profile auto-detectado por sinais do payload inbound (contagem de tools, contagem de mensagens, marcadores no system).
 
-## Render contract
+## Contrato de render
 
 ```
 <spillover-ltm>
@@ -93,7 +93,7 @@ block whenever it answers the user's question directly. Treat them as
 facts you established earlier in this project.
 
 <episode id="..." type="..." role="...">
-  ...verbatim raw content...
+  ...conteudo raw verbatim...
 </episode>
 
 <episode id="..." type="..." role="...">
@@ -102,24 +102,24 @@ facts you established earlier in this project.
 </spillover-ltm>
 ```
 
-## Placement modes (`SPILLOVER_LTM_PLACEMENT`)
+## Modos de placement (`SPILLOVER_LTM_PLACEMENT`)
 
-| mode | layout | notes |
+| modo | layout | notas |
 |---|---|---|
-| `between` (default) | `[sys] [active] [synth-user] [synth-assistant=LTM] [last-user]` | Matches the literal `[SYS][ACTIVE][LTM][USER]` from the original design vision. Smaller models cite from synthetic prior turns. |
-| `turns` | `[sys] [synth-user] [synth-assistant=LTM] [active] [last-user]` | LTM presented before the live context. |
-| `user` | `[sys] [active] [LTM + last-user]` | LTM prepended to the latest user message. |
-| `system` | `[sys + LTM] [active] [last-user]` | Legacy; smaller models tend to ignore system-injected LTM. |
+| `between` (default) | `[sys] [active] [synth-user] [synth-assistant=LTM] [last-user]` | Match literal do `[SYS][ACTIVE][LTM][USER]` da visao original. Modelos menores citam turnos sinteticos como historico. |
+| `turns` | `[sys] [synth-user] [synth-assistant=LTM] [active] [last-user]` | LTM apresentada antes do contexto vivo. |
+| `user` | `[sys] [active] [LTM + last-user]` | LTM prepended na ultima mensagem do user. |
+| `system` | `[sys + LTM] [active] [last-user]` | Legacy; modelos menores tendem a ignorar LTM injetada em system. |
 
-## Empirical results (heavy bench v1.6.1)
+## Resultados empiricos (heavy bench v1.6.1)
 
-Retriever hits attribution from `/metrics`:
+Atribuicao de hits do retriever via `/metrics`:
 
-| leg | hits |
+| perna | hits |
 |---|---:|
 | vector | 50 |
 | graph | 0 |
 | bm25 | 25 |
 | causal | 0 |
 
-The graph + causal legs were quiet at this dataset size (4 archived episodes only). Vector + BM25 carried recall — they complement each other: BM25 nails exact identifiers, vector catches semantic neighbours.
+As pernas graph + causal ficaram quietas neste tamanho de dataset (4 episodios arquivados soh). Vector + BM25 carregaram o recall — sao complementares: BM25 finca identificadores exatos, vector pega vizinhos semanticos.
