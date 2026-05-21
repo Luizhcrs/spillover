@@ -41,6 +41,9 @@ packages = ["src/spillover"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra -q"
+markers = [
+    "slow: tests that download the embedding model (~130MB)",
+]
 
 [tool.ruff]
 line-length = 100
