@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 _OPEN_TASK_PATTERNS = [
     re.compile(r"(?i)\bTODO\b"),
     re.compile(r"(?i)\bFIXME\b"),
