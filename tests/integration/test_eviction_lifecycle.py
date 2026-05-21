@@ -92,3 +92,74 @@ def test_eviction_triggers_above_watermark(client, config):
         assert freed >= 80
     finally:
         db.close()
+
+
+@respx.mock
+def test_eviction_uses_last_user_turn_not_last_assistant(client, config):
+    """If the conversation ends with an assistant turn (malformed input), the
+    eviction should still find the last user turn rather than misattributing."""
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=_upstream_resp(900, 80)
+    )
+    messages = []
+    for i in range(11):
+        messages.append(
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "x" * 320}
+        )
+    # Add a trailing assistant message so the last turn is NOT role=user
+    messages.append({"role": "assistant", "content": "x" * 320})
+    r = client.post(
+        "/v1/messages",
+        headers={"X-Project": "abc123def", "Authorization": "Bearer t"},
+        json={
+            "model": "claude-opus-4-7",
+            "max_tokens": 100,
+            "messages": messages,
+        },
+    )
+    assert r.status_code == 200
+    # No assertion failure inside _maybe_evict, eviction ran
+    db = open_project_db(config.db_root, "abc123def")
+    try:
+        evicted = db.execute(
+            "SELECT COUNT(*) FROM episodes WHERE evicted=1"
+        ).fetchone()[0]
+        assert evicted > 0
+    finally:
+        db.close()
+
+
+@respx.mock
+def test_eviction_archives_actual_content(client, config):
+    """Verify the archived rows contain the original turn content, not tool_calls
+    or some swapped field."""
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=_upstream_resp(900, 80)
+    )
+    messages = []
+    for i in range(12):
+        role = "user" if i % 2 == 0 else "assistant"
+        messages.append({"role": role, "content": f"turn-{i:02d}-" + ("y" * 300)})
+    r = client.post(
+        "/v1/messages",
+        headers={"X-Project": "fedcba98", "Authorization": "Bearer t"},
+        json={
+            "model": "claude-opus-4-7",
+            "max_tokens": 100,
+            "messages": messages,
+        },
+    )
+    assert r.status_code == 200
+    import json as _json
+    db = open_project_db(config.db_root, "fedcba98")
+    try:
+        rows = db.execute(
+            "SELECT content_json FROM episodes WHERE evicted=1 ORDER BY id"
+        ).fetchall()
+        assert len(rows) > 0
+        for row in rows:
+            content = _json.loads(row["content_json"])
+            assert isinstance(content, str)
+            assert content.startswith("turn-")
+    finally:
+        db.close()

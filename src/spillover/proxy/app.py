@@ -85,12 +85,18 @@ def _maybe_evict(
     if not conv.turns:
         return
 
-    new_user_tokens = conv.turns[-1].token_count
+    new_user_tokens = next(
+        (t.token_count for t in reversed(conv.turns) if t.role == "user"),
+        0,
+    )
     new_assistant_tokens = count_tokens(assistant_text or "")
     tokens_to_free = new_user_tokens + new_assistant_tokens
     if tokens_to_free <= 0:
         return
 
+    turns_by_source = {
+        t.source_index: t for t in conv.turns if t.source_index is not None
+    }
     active = [
         ActiveTurn(
             index=t.source_index if t.source_index is not None else i,
@@ -113,9 +119,9 @@ def _maybe_evict(
         ts = int(time.time() * 1000)
         episode_ids: list[str] = []
         for idx in result.evicted_indexes:
-            turn = next(
-                t for t in conv.turns if (t.source_index or 0) == idx
-            )
+            turn = turns_by_source.get(idx)
+            if turn is None:
+                continue
             eid = archive_raw(
                 db,
                 Turn(
