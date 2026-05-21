@@ -59,12 +59,14 @@ def test_query_prints_hits(tmp_path, monkeypatch):
     import struct
 
     monkeypatch.setenv("SPILLOVER_DB_ROOT", str(tmp_path))
-    db = open_project_db(tmp_path, "p1")
+    # Use a hex id so _resolve_pid passes it through unchanged
+    pid = "abcdef123456"
+    db = open_project_db(tmp_path, pid)
     try:
         eid = archive_raw(
             db,
             Turn(
-                project_id="p1",
+                project_id=pid,
                 role="user",
                 content="something about foo.py",
                 tool_calls=[],
@@ -83,7 +85,7 @@ def test_query_prints_hits(tmp_path, monkeypatch):
         db.close()
 
     runner = CliRunner()
-    result = runner.invoke(main, ["query", "p1", "foo.py"])
+    result = runner.invoke(main, ["query", pid, "foo.py"])
     assert result.exit_code == 0
     assert "score=" in result.output
 
