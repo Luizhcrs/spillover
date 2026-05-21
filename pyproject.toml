@@ -20,6 +20,7 @@ dependencies = [
     "sqlite-vec>=0.1.6",
     "kuzu>=0.8.0",
     "fastembed>=0.4",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
