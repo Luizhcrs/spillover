@@ -5,7 +5,6 @@ import sqlite3
 
 from spillover.retriever.vector import Hit
 
-
 # Lightweight tokenizer for query sanitization. FTS5 MATCH syntax is sensitive
 # to special chars and operators; we extract bag-of-words and OR-join.
 _TOKEN = re.compile(r"[A-Za-z0-9_]{2,}")
