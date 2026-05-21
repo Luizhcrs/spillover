@@ -35,6 +35,9 @@ dev = [
 [project.scripts]
 spillover = "spillover.cli:main"
 spillover-cc = "spillover.wrappers.cc:main"
+spillover-codex = "spillover.wrappers.codex:main"
+spillover-cursor = "spillover.wrappers.cursor:main"
+spillover-continue = "spillover.wrappers.continue_dev:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/spillover"]
