@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass
@@ -12,6 +12,7 @@ class ConversationTurn:
     tool_calls: list[dict] = field(default_factory=list)
     token_count: int = 0
     source_index: int | None = None  # original position in inbound payload
+    source: Literal["live", "injected"] = "live"  # set to "injected" by retriever (Plan 2)
 
 
 @dataclass

@@ -22,3 +22,13 @@ def test_conversation_total_tokens():
         ],
     )
     assert c.total_input_tokens == 5 + 2 + 4
+
+
+def test_conversation_turn_source_default_is_live():
+    t = ConversationTurn(role="user", content="x")
+    assert t.source == "live"
+
+
+def test_conversation_turn_source_can_be_injected():
+    t = ConversationTurn(role="user", content="x", source="injected")
+    assert t.source == "injected"
