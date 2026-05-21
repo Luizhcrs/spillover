@@ -22,7 +22,7 @@ from spillover.facet.entities import extract_entities
 from spillover.facet.worker import FacetEvent, FacetWorker
 from spillover.logging import configure_root_logger, get_logger
 from spillover.proxy.middleware import ProjectIdMiddleware
-from spillover.proxy.retry import with_retry
+from spillover.proxy.retry import with_retry, with_retry_stream
 from spillover.retriever.budget import trim_to_budget
 from spillover.retriever.fusion import rrf_fuse
 from spillover.retriever.graph import graph_walk
@@ -606,11 +606,13 @@ def create_app(config: Config) -> FastAPI:
 
         rewrite_enabled = _stream_rewrite_enabled(config)
 
-        upstream = await app.state.http_client.send(
-            app.state.http_client.build_request(
+        def _build_stream_request():
+            return app.state.http_client.build_request(
                 "POST", upstream_url, headers=fwd_headers, content=forwarded_body
-            ),
-            stream=True,
+            )
+
+        upstream = await with_retry_stream(
+            app.state.http_client, _build_stream_request
         )
         sink: list[bytes] = []
 
