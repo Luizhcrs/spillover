@@ -13,6 +13,7 @@ from spillover.archive.writer import Turn, archive_raw
 from spillover.config import Config
 from spillover.eviction.selector import ActiveTurn, select_for_eviction
 from spillover.eviction.tokenizer import count_tokens
+from spillover.logging import configure_root_logger, get_logger
 from spillover.proxy.middleware import ProjectIdMiddleware
 from spillover.proxy.streaming import duplicate_stream
 from spillover.storage.sqlite import open_project_db
@@ -115,6 +116,17 @@ def _maybe_evict(
     if not result.evicted_indexes:
         return
 
+    log = get_logger("eviction")
+    log.info(
+        "eviction project=%s tokens_to_free=%d freed=%d"
+        " pass=%d budget_pressure=%s evicted_count=%d",
+        project_id,
+        tokens_to_free,
+        result.tokens_freed,
+        result.pass_used,
+        result.budget_pressure,
+        len(result.evicted_indexes),
+    )
     db = open_project_db(config.db_root, project_id)
     try:
         ts = int(time.time() * 1000)
@@ -147,6 +159,8 @@ def _maybe_evict(
 
 
 def create_app(config: Config) -> FastAPI:
+    configure_root_logger()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.config = config
@@ -198,6 +212,9 @@ def create_app(config: Config) -> FastAPI:
                     _maybe_evict(
                         config, project_id, payload, assistant_text, usage
                     )
+            if r.status_code >= 400:
+                log = get_logger("proxy")
+                log.warning("upstream non-2xx status=%d project=%s", r.status_code, project_id)
             return JSONResponse(
                 content=json.loads(resp_bytes),
                 status_code=r.status_code,
@@ -225,6 +242,13 @@ def create_app(config: Config) -> FastAPI:
                         _maybe_evict(
                             config, project_id, payload, assistant_text, usage
                         )
+                if upstream.status_code >= 400:
+                    log = get_logger("proxy")
+                    log.warning(
+                        "upstream non-2xx (stream) status=%d project=%s",
+                        upstream.status_code,
+                        project_id,
+                    )
 
         return StreamingResponse(
             proxy_stream(),
