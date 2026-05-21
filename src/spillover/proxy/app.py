@@ -7,10 +7,11 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from spillover.adapters.anthropic import AnthropicAdapter
-from spillover.adapters.base import Conversation
+from spillover.adapters.base import Adapter, Conversation
+from spillover.adapters.openai import OpenAIAdapter
 from spillover.archive.writer import Turn, archive_raw
 from spillover.config import Config
 from spillover.eviction.selector import ActiveTurn, select_for_eviction
@@ -30,7 +31,9 @@ from spillover.storage.kuzu import open_project_kuzu
 from spillover.storage.sqlite import open_project_db
 
 
-def _extract_usage_non_streaming(body: bytes) -> tuple[int, int] | None:
+def _extract_usage_non_streaming(
+    body: bytes, provider: str = "anthropic"
+) -> tuple[int, int] | None:
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
@@ -38,6 +41,8 @@ def _extract_usage_non_streaming(body: bytes) -> tuple[int, int] | None:
     usage = data.get("usage")
     if not usage:
         return None
+    if provider == "openai":
+        return int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0))
     return int(usage.get("input_tokens", 0)), int(usage.get("output_tokens", 0))
 
 
@@ -78,6 +83,11 @@ def _extract_assistant_text_sse(captured: list[bytes]) -> str:
         if "text" in delta:
             text += delta["text"]
     return text
+
+
+def _stream_rewrite_enabled(config: Config) -> bool:
+    import os
+    return os.environ.get("SPILLOVER_STREAM_REWRITE", "1") != "0"
 
 
 def _retrieve_ltm_block(config: Config, project_id: str, conv: Conversation) -> str:
@@ -147,6 +157,7 @@ def _maybe_evict(
     inbound_payload: dict,
     assistant_text: str | None,
     usage: tuple[int, int],
+    adapter: Adapter | None = None,
 ) -> tuple[list[str], int]:
     """Return (archived_ids, tokens_archived) for this call (may be empty)."""
     input_tokens, output_tokens = usage
@@ -154,8 +165,8 @@ def _maybe_evict(
     if fill_ratio < config.watermark:
         return [], 0
 
-    adapter = AnthropicAdapter()
-    conv = adapter.parse(inbound_payload)
+    _adapter = adapter or AnthropicAdapter()
+    conv = _adapter.parse(inbound_payload)
     if not conv.turns:
         return [], 0
 
@@ -261,22 +272,31 @@ def create_app(config: Config) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        from spillover.decay.scheduler import DecayScheduler
+
         app.state.config = config
         app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0))
         app.state.facet_queue = asyncio.Queue()
         app.state.facet_worker = FacetWorker(app.state.facet_queue)
         app.state.facet_worker.start()
+        app.state.decay_scheduler = DecayScheduler(config.db_root)
+        app.state.decay_scheduler.start()
         try:
             yield
         finally:
+            await app.state.decay_scheduler.stop()
             await app.state.facet_worker.stop()
             await app.state.http_client.aclose()
 
-    app = FastAPI(title="spillover", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="spillover", version="1.0.0", lifespan=lifespan)
     app.add_middleware(ProjectIdMiddleware)
 
-    @app.post("/v1/messages")
-    async def messages(request: Request):
+    async def _handle_request(
+        request: Request,
+        adapter: Adapter,
+        upstream_url: str,
+        provider: str,
+    ):
         body = await request.body()
         try:
             payload = json.loads(body)
@@ -297,13 +317,14 @@ def create_app(config: Config) -> FastAPI:
         )
         from spillover.counter_compact.usage_rewrite import rewrite_response_json
 
-        if should_intercept_request(payload):
+        # Intercept only applies to Anthropic wire format (compact signal)
+        if provider == "anthropic" and should_intercept_request(payload):
             log.info("intercept compact project=%s", project_id)
             return JSONResponse(make_intercept_response(payload), status_code=200)
 
         # Retrieval pass: inject LTM into the payload before forwarding.
         try:
-            conv = AnthropicAdapter().parse(payload)
+            conv = adapter.parse(payload)
             ltm_text = _retrieve_ltm_block(config, project_id, conv)
             _inject_ltm(payload, ltm_text)
         except Exception:
@@ -311,13 +332,15 @@ def create_app(config: Config) -> FastAPI:
                 "retriever failed project=%s; proceeding without LTM", project_id
             )
 
-        # Detect compaction by diffing inbound against seen_turns
-        rescue_db = open_project_db(config.db_root, project_id)
-        try:
-            rescued = detect_compaction(rescue_db, project_id, payload.get("messages") or [])
-            record_seen_turns(rescue_db, project_id, payload.get("messages") or [])
-        finally:
-            rescue_db.close()
+        # Detect compaction by diffing inbound against seen_turns (Anthropic only)
+        rescued: list = []
+        if provider == "anthropic":
+            rescue_db = open_project_db(config.db_root, project_id)
+            try:
+                rescued = detect_compaction(rescue_db, project_id, payload.get("messages") or [])
+                record_seen_turns(rescue_db, project_id, payload.get("messages") or [])
+            finally:
+                rescue_db.close()
 
         if rescued:
             rescue_db2 = open_project_db(config.db_root, project_id)
@@ -351,7 +374,6 @@ def create_app(config: Config) -> FastAPI:
                 rescue_db2.close()
 
         forwarded_body = json.dumps(payload).encode("utf-8")
-        upstream_url = f"{config.upstream_base_url}/v1/messages"
         fwd_headers = {
             k: v
             for k, v in request.headers.items()
@@ -367,7 +389,7 @@ def create_app(config: Config) -> FastAPI:
             archived_ids: list[str] = []
             tokens_archived = 0
             if r.status_code == 200:
-                usage = _extract_usage_non_streaming(resp_bytes)
+                usage = _extract_usage_non_streaming(resp_bytes, provider)
                 if usage is not None:
                     try:
                         resp_json = json.loads(resp_bytes)
@@ -379,7 +401,7 @@ def create_app(config: Config) -> FastAPI:
                         if isinstance(b, dict)
                     )
                     archived_ids, tokens_archived = _maybe_evict(
-                        config, project_id, payload, assistant_text, usage
+                        config, project_id, payload, assistant_text, usage, adapter
                     )
                     if tokens_archived > 0:
                         try:
@@ -402,41 +424,116 @@ def create_app(config: Config) -> FastAPI:
                 headers={"content-type": "application/json"},
             )
 
-        upstream = await app.state.http_client.send(
-            app.state.http_client.build_request(
-                "POST", upstream_url, headers=fwd_headers, content=forwarded_body
-            ),
-            stream=True,
-        )
-        sink: list[bytes] = []
+        # Streaming branch
+        if not _stream_rewrite_enabled(config):
+            # Plan 3 behavior: yield live, no SSE usage rewrite
+            upstream = await app.state.http_client.send(
+                app.state.http_client.build_request(
+                    "POST", upstream_url, headers=fwd_headers, content=forwarded_body
+                ),
+                stream=True,
+            )
+            sink: list[bytes] = []
 
-        async def proxy_stream():
-            try:
-                async for chunk in duplicate_stream(upstream.aiter_bytes(), sink):
-                    yield chunk
-            finally:
-                await upstream.aclose()
-                archived_ids: list[str] = []
-                if upstream.status_code == 200:
-                    usage = _extract_usage_sse(sink)
-                    if usage is not None:
-                        assistant_text = _extract_assistant_text_sse(sink)
-                        archived_ids, _ = _maybe_evict(
-                            config, project_id, payload, assistant_text, usage
+            async def proxy_stream_live():
+                try:
+                    async for chunk in duplicate_stream(upstream.aiter_bytes(), sink):
+                        yield chunk
+                finally:
+                    await upstream.aclose()
+                    archived_ids_s: list[str] = []
+                    if upstream.status_code == 200:
+                        usage = _extract_usage_sse(sink)
+                        if usage is not None:
+                            assistant_text = _extract_assistant_text_sse(sink)
+                            archived_ids_s, _ = _maybe_evict(
+                                config, project_id, payload, assistant_text, usage, adapter
+                            )
+                    if upstream.status_code >= 400:
+                        log.warning(
+                            "upstream non-2xx (stream) status=%d project=%s",
+                            upstream.status_code,
+                            project_id,
                         )
-                if upstream.status_code >= 400:
-                    log.warning(
-                        "upstream non-2xx (stream) status=%d project=%s",
-                        upstream.status_code,
-                        project_id,
-                    )
-                if archived_ids:
-                    _enqueue_facets(app, project_id, archived_ids, config)
+                    if archived_ids_s:
+                        _enqueue_facets(app, project_id, archived_ids_s, config)
+
+            return StreamingResponse(
+                proxy_stream_live(),
+                media_type="text/event-stream",
+                status_code=upstream.status_code,
+            )
+
+        # Buffered SSE with usage rewrite
+        from spillover.counter_compact.sse_rewrite import rewrite_sse_body
+
+        buf = b""
+        upstream_status = 200
+        async with app.state.http_client.stream(
+            "POST", upstream_url, headers=fwd_headers, content=forwarded_body
+        ) as upstream_stream:
+            upstream_status = upstream_stream.status_code
+            async for chunk in upstream_stream.aiter_bytes():
+                buf += chunk
+
+        archived_ids_buf: list[str] = []
+        tokens_archived_buf = 0
+        if upstream_status == 200:
+            usage = _extract_usage_sse([buf])
+            if usage is not None:
+                assistant_text_buf = _extract_assistant_text_sse([buf])
+                archived_ids_buf, tokens_archived_buf = _maybe_evict(
+                    config, project_id, payload, assistant_text_buf, usage, adapter
+                )
+        if upstream_status >= 400:
+            log.warning(
+                "upstream non-2xx (stream-buf) status=%d project=%s",
+                upstream_status,
+                project_id,
+            )
+        if tokens_archived_buf > 0:
+            buf = rewrite_sse_body(buf, tokens_archived_buf)
+        if archived_ids_buf:
+            _enqueue_facets(app, project_id, archived_ids_buf, config)
+
+        _buf_final = buf
+
+        async def proxy_stream_buffered():
+            yield _buf_final
 
         return StreamingResponse(
-            proxy_stream(),
+            proxy_stream_buffered(),
             media_type="text/event-stream",
-            status_code=upstream.status_code,
+            status_code=upstream_status,
+        )
+
+    @app.post("/v1/messages")
+    async def messages_anthropic(request: Request):
+        return await _handle_request(
+            request,
+            adapter=AnthropicAdapter(),
+            upstream_url=f"{config.upstream_base_url}/v1/messages",
+            provider="anthropic",
+        )
+
+    @app.post("/v1/chat/completions")
+    async def messages_openai(request: Request):
+        return await _handle_request(
+            request,
+            adapter=OpenAIAdapter(),
+            upstream_url=f"{config.openai_base_url}/v1/chat/completions",
+            provider="openai",
+        )
+
+    @app.get("/metrics")
+    async def metrics():
+        from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+        from spillover.metrics.registry import REGISTRY
+
+        return Response(
+            generate_latest(REGISTRY),
+            media_type=CONTENT_TYPE_LATEST,
         )
 
     return app

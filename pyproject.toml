@@ -20,6 +20,7 @@ dependencies = [
     "sqlite-vec>=0.1.6",
     "kuzu>=0.8.0",
     "fastembed>=0.4",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +35,9 @@ dev = [
 [project.scripts]
 spillover = "spillover.cli:main"
 spillover-cc = "spillover.wrappers.cc:main"
+spillover-codex = "spillover.wrappers.codex:main"
+spillover-cursor = "spillover.wrappers.cursor:main"
+spillover-continue = "spillover.wrappers.continue_dev:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/spillover"]

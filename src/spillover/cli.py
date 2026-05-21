@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 import uvicorn
 
@@ -95,6 +97,26 @@ def query(project_id: str, text: str, topk: int | None):
             )
     finally:
         db.close()
+
+
+@main.command()
+@click.option("--report", type=click.Path(dir_okay=False), default="bench-report.md")
+@click.option("--tasks", type=click.Path(exists=True, dir_okay=False), required=False)
+def bench(report: str, tasks: str | None):
+    """Run the offline A/B benchmark harness and write a markdown report."""
+    import json
+
+    from spillover.bench.ab import RunResult, render_markdown, summarize_runs
+
+    if not tasks:
+        click.echo("No --tasks file provided; nothing to run.")
+        return
+
+    raw = json.loads(Path(tasks).read_text(encoding="utf-8"))
+    runs = [RunResult(**r) for r in raw]
+    md = render_markdown(summarize_runs(runs))
+    Path(report).write_text(md, encoding="utf-8")
+    click.echo(f"wrote {report}")
 
 
 if __name__ == "__main__":
