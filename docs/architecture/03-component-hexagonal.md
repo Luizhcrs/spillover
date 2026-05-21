@@ -151,7 +151,7 @@ Orquestram policies de dominio atraves de ports outbound.
 
 ## Desvios pragmaticos do hexagonal estrito
 
-spillover e hexagonal-por-feature, nao hexagonal-por-camada. Desvios honestos:
+spillover e hexagonal-por-feature, nao hexagonal-por-camada. Desvios:
 
 1. `proxy/app.py` mistura camadas — `_retrieve_ltm_block` chama outbound adapters direto sem interface intermediaria.
 2. `facet/worker._process_one` chama `open_project_db`, `open_project_kuzu`, `embed_text` direto.

@@ -87,4 +87,4 @@ xychart-beta
     bar [0.30, 0.25, 0.05]
 ```
 
-spillover fica entre "mandar tudo (caro, accurate)" e "resumir tudo (barato, lossy)" — mais perto de caro no preco, mais perto de accurate no recall. A oposicao arquitetural se paga na primeira vez que o agente nao esquece uma decisao.
+spillover fica entre "mandar tudo (caro, accurate)" e "resumir tudo (barato, lossy)" — mais perto de caro no preco, mais perto de accurate no recall.

@@ -2,7 +2,7 @@
 
 Trafego real Anthropic Haiku 4.5, 400 turnos de conversa de engenharia sintetica (~80 k chars / ~22 k tokens Anthropic), 4 fatos ancorados nos turnos 5, 50, 100, 150. Pergunta final pede todos os 4.
 
-## Headline
+## Resumo
 
 ```mermaid
 xychart-beta
@@ -46,7 +46,7 @@ xychart-beta
 
 A unica "miss" literal foi `middleware.py:42` — modelo escreveu `middleware.py line 42` (linguagem natural, mesmo fato). Recall semantica e 4/4.
 
-## Resposta do vanilla (prova de falha)
+## Resposta do vanilla
 
 > Preciso ser honesto: nao consigo recall confiavel desses quatro fatos especificos do nosso historico de conversa.
 >
@@ -58,7 +58,7 @@ A unica "miss" literal foi `middleware.py:42` — modelo escreveu `middleware.py
 
 Falha honesta. Modelo sabe que nao sabe.
 
-## Resposta do spillover (prova de recall)
+## Resposta do spillover
 
 > (1) Escolha do banco: SQLite sobre Postgres porque 'deployment is local-only zero-infra few-hundred-GB max'
 >
@@ -94,7 +94,7 @@ Do `/metrics` apos o run:
 
 Neste tamanho de dataset (4 episodios arquivados soh), vector + BM25 carregaram o recall sozinhos. Pernas graph e causal ativam em escala maior.
 
-## O que prova
+## Observacoes
 
 1. **Correctness end-to-end em escala.** Payload de 400 turnos processado, retornado em 4.4 s, zero erros.
 2. **Counter-compaction invisivel.** Cliente viu `input_tokens=22320` apesar do custo real Anthropic-side ser 22,541.
