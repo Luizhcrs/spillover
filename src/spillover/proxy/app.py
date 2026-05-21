@@ -147,17 +147,17 @@ def _maybe_evict(
     inbound_payload: dict,
     assistant_text: str | None,
     usage: tuple[int, int],
-) -> list[str]:
-    """Return the list of episode ids archived by this call (may be empty)."""
+) -> tuple[list[str], int]:
+    """Return (archived_ids, tokens_archived) for this call (may be empty)."""
     input_tokens, output_tokens = usage
     fill_ratio = (input_tokens + output_tokens) / config.window_max
     if fill_ratio < config.watermark:
-        return []
+        return [], 0
 
     adapter = AnthropicAdapter()
     conv = adapter.parse(inbound_payload)
     if not conv.turns:
-        return []
+        return [], 0
 
     new_user_tokens = next(
         (t.token_count for t in reversed(conv.turns) if t.role == "user"),
@@ -166,7 +166,7 @@ def _maybe_evict(
     new_assistant_tokens = count_tokens(assistant_text or "")
     tokens_to_free = new_user_tokens + new_assistant_tokens
     if tokens_to_free <= 0:
-        return []
+        return [], 0
 
     turns_by_source = {
         t.source_index: t for t in conv.turns if t.source_index is not None
@@ -186,7 +186,7 @@ def _maybe_evict(
         active, tokens_to_free=tokens_to_free, recent_buffer=4
     )
     if not result.evicted_indexes:
-        return []
+        return [], 0
 
     log = get_logger("eviction")
     log.info(
@@ -202,6 +202,7 @@ def _maybe_evict(
 
     db = open_project_db(config.db_root, project_id)
     archived_ids: list[str] = []
+    tokens_archived = 0
     try:
         ts = int(time.time() * 1000)
         episode_ids: list[str] = []
@@ -222,6 +223,7 @@ def _maybe_evict(
                 ),
             )
             episode_ids.append(eid)
+            tokens_archived += turn.token_count
         if episode_ids:
             placeholders = ",".join("?" for _ in episode_ids)
             db.execute(
@@ -231,7 +233,7 @@ def _maybe_evict(
             archived_ids = episode_ids
     finally:
         db.close()
-    return archived_ids
+    return archived_ids, tokens_archived
 
 
 def _enqueue_facets(
@@ -285,6 +287,20 @@ def create_app(config: Config) -> FastAPI:
             )
         project_id = request.state.project_id
 
+        from spillover.counter_compact.detection import (
+            detect_compaction,
+            record_seen_turns,
+        )
+        from spillover.counter_compact.intercept import (
+            make_intercept_response,
+            should_intercept_request,
+        )
+        from spillover.counter_compact.usage_rewrite import rewrite_response_json
+
+        if should_intercept_request(payload):
+            log.info("intercept compact project=%s", project_id)
+            return JSONResponse(make_intercept_response(payload), status_code=200)
+
         # Retrieval pass: inject LTM into the payload before forwarding.
         try:
             conv = AnthropicAdapter().parse(payload)
@@ -294,6 +310,45 @@ def create_app(config: Config) -> FastAPI:
             log.exception(
                 "retriever failed project=%s; proceeding without LTM", project_id
             )
+
+        # Detect compaction by diffing inbound against seen_turns
+        rescue_db = open_project_db(config.db_root, project_id)
+        try:
+            rescued = detect_compaction(rescue_db, project_id, payload.get("messages") or [])
+            record_seen_turns(rescue_db, project_id, payload.get("messages") or [])
+        finally:
+            rescue_db.close()
+
+        if rescued:
+            rescue_db2 = open_project_db(config.db_root, project_id)
+            try:
+                rescue_ids: list[str] = []
+                rescue_ts = int(time.time() * 1000)
+                for r in rescued:
+                    eid = archive_raw(
+                        rescue_db2,
+                        Turn(
+                            project_id=project_id,
+                            role=r.role,
+                            content=r.content,
+                            tool_calls=[],
+                            code_refs=[],
+                            token_count=r.token_count,
+                            ts=rescue_ts,
+                            compaction_rescued=True,
+                        ),
+                    )
+                    rescue_ids.append(eid)
+                if rescue_ids:
+                    placeholders = ",".join("?" for _ in rescue_ids)
+                    rescue_db2.execute(
+                        f"UPDATE episodes SET evicted=1, compaction_rescued=1 "
+                        f"WHERE id IN ({placeholders})",
+                        rescue_ids,
+                    )
+                    _enqueue_facets(app, project_id, rescue_ids, config)
+            finally:
+                rescue_db2.close()
 
         forwarded_body = json.dumps(payload).encode("utf-8")
         upstream_url = f"{config.upstream_base_url}/v1/messages"
@@ -310,6 +365,7 @@ def create_app(config: Config) -> FastAPI:
             )
             resp_bytes = r.content
             archived_ids: list[str] = []
+            tokens_archived = 0
             if r.status_code == 200:
                 usage = _extract_usage_non_streaming(resp_bytes)
                 if usage is not None:
@@ -322,9 +378,16 @@ def create_app(config: Config) -> FastAPI:
                         for b in resp_json.get("content", [])
                         if isinstance(b, dict)
                     )
-                    archived_ids = _maybe_evict(
+                    archived_ids, tokens_archived = _maybe_evict(
                         config, project_id, payload, assistant_text, usage
                     )
+                    if tokens_archived > 0:
+                        try:
+                            resp_json = json.loads(resp_bytes)
+                        except json.JSONDecodeError:
+                            resp_json = {}
+                        resp_json = rewrite_response_json(resp_json, tokens_archived)
+                        resp_bytes = json.dumps(resp_json).encode("utf-8")
             if r.status_code >= 400:
                 log.warning(
                     "upstream non-2xx status=%d project=%s",
@@ -358,7 +421,7 @@ def create_app(config: Config) -> FastAPI:
                     usage = _extract_usage_sse(sink)
                     if usage is not None:
                         assistant_text = _extract_assistant_text_sse(sink)
-                        archived_ids = _maybe_evict(
+                        archived_ids, _ = _maybe_evict(
                             config, project_id, payload, assistant_text, usage
                         )
                 if upstream.status_code >= 400:
