@@ -1,0 +1,702 @@
+```
+=== FILE: backend.py ===
+```python
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+import sqlite3
+import json
+from datetime import datetime, timedelta
+from typing import Optional
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DB_PATH = "barbearia.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.executescript("""
+    CREATE TABLE IF NOT EXISTS barbeiros (
+        id INTEGER PRIMARY KEY,
+        nome TEXT NOT NULL,
+        experiencia INTEGER NOT NULL,
+        especialidade TEXT NOT NULL
+    );
+    
+    CREATE TABLE IF NOT EXISTS servicos (
+        id INTEGER PRIMARY KEY,
+        nome TEXT NOT NULL,
+        preco REAL NOT NULL,
+        duracao_min INTEGER NOT NULL
+    );
+    
+    CREATE TABLE IF NOT EXISTS agendamentos (
+        id INTEGER PRIMARY KEY,
+        barbeiro_id INTEGER NOT NULL,
+        servico_id INTEGER NOT NULL,
+        cliente_nome TEXT NOT NULL,
+        cliente_telefone TEXT NOT NULL,
+        data_hora TIMESTAMP NOT NULL,
+        status TEXT DEFAULT 'pendente',
+        FOREIGN KEY (barbeiro_id) REFERENCES barbeiros(id),
+        FOREIGN KEY (servico_id) REFERENCES servicos(id)
+    );
+    """)
+    
+    cursor.execute("SELECT COUNT(*) FROM barbeiros")
+    if cursor.fetchone()[0] == 0:
+        barbeiros = [
+            (1, 'Joao', 15, 'degrade'),
+            (2, 'Pedro', 8, 'barba e bigode'),
+            (3, 'Carlos', 5, 'cortes jovens')
+        ]
+        cursor.executemany("INSERT INTO barbeiros VALUES (?, ?, ?, ?)", barbeiros)
+    
+    cursor.execute("SELECT COUNT(*) FROM servicos")
+    if cursor.fetchone()[0] == 0:
+        servicos = [
+            (1, 'Corte Masculino', 45.00, 30),
+            (2, 'Barba Completa', 35.00, 30),
+            (3, 'Combo Cabelo + Barba', 75.00, 60),
+            (4, 'Pigmentacao de Cabelo', 90.00, 90),
+            (5, 'Sobrancelha Masculina', 20.00, 15)
+        ]
+        cursor.executemany("INSERT INTO servicos VALUES (?, ?, ?, ?)", servicos)
+    
+    conn.commit()
+    conn.close()
+
+init_db()
+
+@app.get("/")
+async def serve_frontend():
+    return FileResponse("frontend.html", media_type="text/html")
+
+@app.get("/api/barbeiros")
+def get_barbeiros():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM barbeiros ORDER BY id")
+    barbeiros = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return barbeiros
+
+@app.get("/api/servicos")
+def get_servicos():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM servicos ORDER BY id")
+    servicos = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return servicos
+
+@app.post("/api/agendamentos")
+def create_agendamento(barbeiro_id: int, servico_id: int, cliente_nome: str, cliente_telefone: str, data_hora: str):
+    try:
+        agendamento_dt = datetime.fromisoformat(data_hora)
+    except:
+        raise HTTPException(status_code=400, detail="data_hora inválida")
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT * FROM barbeiros WHERE id = ?", (barbeiro_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
+    
+    cursor.execute("SELECT * FROM servicos WHERE id = ?", (servico_id,))
+    if not cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Serviço não encontrado")
+    
+    cursor.execute(
+        "INSERT INTO agendamentos (barbeiro_id, servico_id, cliente_nome, cliente_telefone, data_hora, status) VALUES (?, ?, ?, ?, ?, ?)",
+        (barbeiro_id, servico_id, cliente_nome, cliente_telefone, data_hora, 'pendente')
+    )
+    conn.commit()
+    agendamento_id = cursor.lastrowid
+    
+    print(f"[WHATSAPP] Olá {cliente_nome}, agendamento confirmado pra {data_hora}")
+    
+    conn.close()
+    return {"id": agendamento_id, "status": "confirmado"}
+
+@app.delete("/api/agendamentos/{agendamento_id}")
+def cancel_agendamento(agendamento_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT data_hora FROM agendamentos WHERE id = ?", (agendamento_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado")
+    
+    agendamento_dt = datetime.fromisoformat(row[0])
+    agora = datetime.now()
+    diferenca = agendamento_dt - agora
+    
+    if diferenca < timedelta(hours=1):
+        conn.close()
+        raise HTTPException(status_code=403, detail="Cancelamento apenas com 1h de antecedência")
+    
+    cursor.execute("DELETE FROM agendamentos WHERE id = ?", (agendamento_id,))
+    conn.commit()
+    conn.close()
+    
+    return {"status": "cancelado"}
+
+@app.get("/api/agendamentos")
+def get_agendamentos(telefone: Optional[str] = None):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    if telefone:
+        cursor.execute("SELECT * FROM agendamentos WHERE cliente_telefone = ? AND status = 'pendente' ORDER BY data_hora", (telefone,))
+    else:
+        cursor.execute("SELECT * FROM agendamentos WHERE status = 'pendente' ORDER BY data_hora")
+    
+    agendamentos = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return agendamentos
+```
+
+```
+=== FILE: frontend.html ===
+```html
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Três Tesouras - Barbearia</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+        h1, h2, h3, h4, h5, h6 {
+            font-family: 'Playfair Display', serif;
+        }
+        body {
+            background-color: #f5f1ea;
+            color: #1a1a1a;
+        }
+        .nav-bar {
+            background-color: #1a1a1a;
+            color: #f5f1ea;
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 50;
+            padding: 1rem 2rem;
+        }
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            font-family: 'Playfair Display', serif;
+            color: #d4a574;
+        }
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+        }
+        .nav-links a {
+            color: #f5f1ea;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        .nav-links a:hover {
+            color: #d4a574;
+        }
+        .cta-btn {
+            background-color: #d4a574;
+            color: #1a1a1a;
+            padding: 0.75rem 1.5rem;
+            border-radius: 24px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .cta-btn:hover {
+            background-color: #c89a60;
+            transform: scale(1.02);
+        }
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            transition: all 0.2s;
+        }
+        .card:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        }
+        .hero {
+            margin-top: 5rem;
+            padding: 3rem 2rem;
+            text-align: center;
+        }
+        .hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 1rem;
+            color: #1a1a1a;
+        }
+        .hero p {
+            font-size: 1.25rem;
+            color: #666;
+            margin-bottom: 2rem;
+        }
+        .footer {
+            background-color: #1a1a1a;
+            color: #f5f1ea;
+            padding: 3rem 2rem;
+            margin-top: 3rem;
+        }
+        .footer-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+        }
+        .footer-col h3 {
+            color: #d4a574;
+            margin-bottom: 1rem;
+        }
+        .footer-col p {
+            line-height: 1.8;
+            font-size: 0.95rem;
+        }
+        .screen {
+            display: none;
+        }
+        .screen.active {
+            display: block;
+        }
+        .content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2rem;
+            }
+            .nav-links {
+                gap: 1rem;
+                font-size: 0.9rem;
+            }
+            .footer-container {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav class="nav-bar">
+        <div class="nav-container">
+            <div class="logo">✂️ Três Tesouras</div>
+            <div class="nav-links">
+                <a href="#home">Home</a>
+                <a href="#agendar">Agendar</a>
+                <a href="#meus-agendamentos">Meus Agendamentos</a>
+                <a href="#sobre">Sobre</a>
+                <button class="cta-btn" onclick="showScreen('agendar')">Agendar agora</button>
+            </div>
+        </div>
+    </nav>
+
+    <div id="home" class="screen active">
+        <div class="hero">
+            <h1>O melhor corte da cidade</h1>
+            <p>Tradição desde 1995. Três barbeiros experientes esperando você.</p>
+            <button class="cta-btn" onclick="showScreen('agendar')" style="font-size: 1.1rem; padding: 1rem 2rem;">Agendar agora</button>
+        </div>
+
+        <div class="content">
+            <div style="margin: 3rem 0;">
+                <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 2rem;">Nossos Serviços</h2>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem;">
+                    <div class="card">
+                        <h3 style="color: #d4a574; margin-bottom: 0.5rem;">Corte Masculino</h3>
+                        <p style="font-size: 2rem; color: #d4a574; font-weight: bold; margin: 1rem 0;">R$ 45</p>
+                        <p style="color: #666; margin-bottom: 1rem;">⏱️ 30 minutos</p>
+                        <button class="cta-btn" style="width: 100%;" onclick="showScreen('agendar')">Agendar</button>
+                    </div>
+                    <div class="card">
+                        <h3 style="color: #d4a574; margin-bottom: 0.5rem;">Barba Completa</h3>
+                        <p style="font-size: 2rem; color: #d4a574; font-weight: bold; margin: 1rem 0;">R$ 35</p>
+                        <p style="color: #666; margin-bottom: 1rem;">⏱️ 30 minutos</p>
+                        <button class="cta-btn" style="width: 100%;" onclick="showScreen('agendar')">Agendar</button>
+                    </div>
+                    <div class="card">
+                        <h3 style="color: #d4a574; margin-bottom: 0.5rem;">Combo Cabelo + Barba</h3>
+                        <p style="font-size: 2rem; color: #d4a574; font-weight: bold; margin: 1rem 0;">R$ 75</p>
+                        <p style="color: #666; margin-bottom: 1rem;">⏱️ 60 minutos</p>
+                        <button class="cta-btn" style="width: 100%;" onclick="showScreen('agendar')">Agendar</button>
+                    </div>
+                    <div class="card">
+                        <h3 style="color: #d4a574; margin-bottom: 0.5rem;">Pigmentação de Cabelo</h3>
+                        <p style="font-size: 2rem; color: #d4a574; font-weight: bold; margin: 1rem 0;">R$ 90</p>
+                        <p style="color: #666; margin-bottom: 1rem;">⏱️ 90 minutos</p>
+                        <button class="cta-btn" style="width: 100%;" onclick="showScreen('agendar')">Agendar</button>
+                    </div>
+                    <div class="card">
+                        <h3 style="color: #d4a574; margin-bottom: 0.5rem;">Sobrancelha Masculina</h3>
+                        <p style="font-size: 2rem; color: #d4a574; font-weight: bold; margin: 1rem 0;">R$ 20</p>
+                        <p style="color: #666; margin-bottom: 1rem;">⏱️ 15 minutos</p>
+                        <button class="cta-btn" style="width: 100%;" onclick="showScreen('agendar')">Agendar</button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin: 3rem 0;">
+                <h2 style="text-align: center; font-size: 2.5rem; margin-bottom: 2rem;">Nossos Barbeiros</h2>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem;">
+                    <div class="card" style="text-align: center;">
+                        <img src="https://placehold.co/200x200/1a1a1a/d4a574?text=Joao" style="border-radius: 8px; width: 100%; margin-bottom: 1rem;">
+                        <h3 style="color: #d4a574; margin-bottom: 0.5rem;">João</h3>
+                        <p style="color: #666; margin-bottom: 0.5rem;">15 anos de experiência</p>
+                        <p style="color: #d4a574; font-weight: bold;">Especialista em degrade</p>
+                    </div>
+                    <div class="card" style="text-align: center;">
+                        <img src="https://placehold.co/200x200/1a1a1a/d4a574?text=Pedro" style="border-radius: 8px; width: 100%; margin-bottom: 1rem;">
+                        <h3 style="color: #d4a574; margin-bottom: 0.5rem;">Pedro</h3>
+                        <p style="color: #666; margin-bottom: 0.5rem;">8 anos de experiência</p>
+                        <p style="color: #d4a574; font-weight: bold;">Especialista em barba e bigode</p>
+                    </div>
+                    <div class="card" style="text-align: center;">
+                        <img src="https://placehold.co/200x200/1a1a1a/d4a574?text=Carlos" style="border-radius: 8px; width: 100%; margin-bottom: 1rem;">
+                        <h3 style="color: #d4a574; margin-bottom: 0.5rem;">Carlos</h3>
+                        <p style="color: #666; margin-bottom: 0.5rem;">5 anos de experiência</p>
+                        <p style="color: #d4a574; font-weight: bold;">Especialista em cortes jovens</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="agendar" class="screen">
+        <div class="content" style="margin-top: 5rem;">
+            <h2 style="font-size: 2rem; margin-bottom: 2rem;">Agendar Horário</h2>
+            <div class="card" style="max-width: 600px;">
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Barbeiro</label>
+                    <select id="barbeiro-select" style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
+                        <option value="">Selecione um barbeiro</option>
+                    </select>
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Serviço</label>
+                    <select id="servico-select" style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
+                        <option value="">Selecione um serviço</option>
+                    </select>
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Data</label>
+                    <input type="date" id="data-input" style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Horário</label>
+                    <select id="hora-select" style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
+                        <option value="">Selecione um horário</option>
+                    </select>
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Seu Nome</label>
+                    <input type="text" id="nome-input" placeholder="Digite seu nome" style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Seu Telefone</label>
+                    <input type="tel" id="telefone-input" placeholder="(11) 98765-4321" style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
+                </div>
+                <button class="cta-btn" style="width: 100%; padding: 1rem; font-size: 1rem;" onclick="procederConfirmacao()">Continuar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="confirmacao" class="screen">
+        <div class="content" style="margin-top: 5rem;">
+            <h2 style="font-size: 2rem; margin-bottom: 2rem;">Confirmar Agendamento</h2>
+            <div class="card" style="max-width: 600px;">
+                <div id="resumo" style="margin-bottom: 2rem; line-height: 2;"></div>
+                <button class="cta-btn" style="width: 100%; padding: 1rem; font-size: 1rem; margin-bottom: 1rem;" onclick="confirmarAgendamento()">Confirmar</button>
+                <button style="width: 100%; padding: 1rem; background-color: #ddd; color: #1a1a1a; border-radius: 24px; border: none; cursor: pointer; font-weight: 600;" onclick="showScreen('agendar')">Voltar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="meus-agendamentos" class="screen">
+        <div class="content" style="margin-top: 5rem;">
+            <h2 style="font-size: 2rem; margin-bottom: 2rem;">Meus Agendamentos</h2>
+            <div class="card" style="max-width: 600px; margin-bottom: 2rem;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Telefone</label>
+                <input type="tel" id="busca-telefone" placeholder="(11) 98765-4321" style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 1rem;">
+                <button class="cta-btn" style="width: 100%; padding: 1rem;" onclick="buscarAgendamentos()">Buscar</button>
+            </div>
+            <div id="lista-agendamentos"></div>
+        </div>
+    </div>
+
+    <div id="sobre" class="screen">
+        <div class="content" style="margin-top: 5rem;">
+            <h2 style="font-size: 2rem; margin-bottom: 2rem;">Sobre Nós</h2>
+            <img src="https://placehold.co/800x400/1a1a1a/d4a574?text=Tres+Tesouras" style="width: 100%; border-radius: 8px; margin-bottom: 2rem; max-width: 800px;">
+            <div class="card">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem;">
+                    <div>
+                        <h3 style="color: #d4a574; margin-bottom: 1rem;">📍 Endereço</h3>
+                        <p>Rua das Palmeiras 123<br>São Paulo, SP</p>
+                    </div>
+                    <div>
+                        <h3 style="color: #d4a574; margin-bottom: 1rem;">📞 Contato</h3>
+                        <p>(11) 98765-4321<br>WhatsApp: (11) 98765-4321</p>
+                    </div>
+                    <div>
+                        <h3 style="color: #d4a574; margin-bottom: 1rem;">🕐 Horário</h3>
+                        <p>Terça a Sábado: 9h - 19h<br>Domingo e Segunda: Fechado</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="footer-container">
+            <div class="footer-col">
+                <h3>Contato</h3>
+                <p>Rua das Palmeiras 123<br>São Paulo, SP<br><br>(11) 98765-4321<br>WhatsApp: (11) 98765-4321</p>
+            </div>
+            <div class="footer-col">
+                <h3>Horário</h3>
+                <p>Terça: 9h - 19h<br>Quarta: 9h - 19h<br>Quinta: 9h - 19h<br>Sexta: 9h - 19h<br>Sábado: 9h - 19h<br><br>Domingo e Segunda: Fechado</p>
+            </div>
+            <div class="footer-col">
+                <h3>Redes Sociais</h3>
+                <p><a href="#" style="color: #d4a574; text-decoration: none;">Instagram</a><br><a href="#" style="color: #d4a574; text-decoration: none;">Facebook</a><br><a href="#" style="color: #d4a574; text-decoration: none;">WhatsApp</a></p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        let barbeiros = [];
+        let servicos = [];
+        let agendamentoAtual = {};
+
+        async function carregarBarbeiros() {
+            const response = await fetch('/api/barbeiros');
+            barbeiros = await response.json();
+            const select = document.getElementById('barbeiro-select');
+            barbeiros.forEach(b => {
+                const option = document.createElement('option');
+                option.value = b.id;
+                option.textContent = b.nome + ' (' + b.especialidade + ')';
+                select.appendChild(option);
+            });
+        }
+
+        async function carregarServicos() {
+            const response = await fetch('/api/servicos');
+            servicos = await response.json();
+            const select = document.getElementById('servico-select');
+            servicos.forEach(s => {
+                const option = document.createElement('option');
+                option.value = s.id;
+                option.textContent = s.nome + ' - R$ ' + s.preco;
+                select.appendChild(option);
+            });
+        }
+
+        function gerarHorarios() {
+            const select = document.getElementById('hora-select');
+            select.innerHTML = '<option value="">Selecione um horário</option>';
+            let hora = 9;
+            let minuto = 0;
+            while (hora < 19 || (hora === 19 && minuto === 0)) {
+                const horarioStr = String(hora).padStart(2, '0') + ':' + String(minuto).padStart(2, '0');
+                const option = document.createElement('option');
+                option.value = horarioStr;
+                option.textContent = horarioStr;
+                select.appendChild(option);
+                minuto += 30;
+                if (minuto === 60) {
+                    minuto = 0;
+                    hora += 1;
+                }
+            }
+        }
+
+        document.getElementById('data-input').addEventListener('change', gerarHorarios);
+
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+            window.scrollTo(0, 0);
+        }
+
+        function procederConfirmacao() {
+            const barbeiro_id = document.getElementById('barbeiro-select').value;
+            const servico_id = document.getElementById('servico-select').value;
+            const data = document.getElementById('data-input').value;
+            const hora = document.getElementById('hora-select').value;
+            const nome = document.getElementById('nome-input').value;
+            const telefone = document.getElementById('telefone-input').value;
+
+            if (!barbeiro_id || !servico_id || !data || !hora || !nome || !telefone) {
+                alert('Preencha todos os campos');
+                return;
+            }
+
+            const data_hora = data + 'T' + hora;
+            agendamentoAtual = { barbeiro_id, servico_id, data_hora, nome, telefone };
+
+            const barbeiro = barbeiros.find(b => b.id == barbeiro_id);
+            const servico = servicos.find(s => s.id == servico_id);
+
+            const resumo = document.getElementById('resumo');
+            resumo.innerHTML = `
+                <strong>Barbeiro:</strong> ${barbeiro.nome}<br>
+                <strong>Serviço:</strong> ${servico.nome} (R$ ${servico.preco})<br>
+                <strong>Data:</strong> ${new Date(data).toLocaleDateString('pt-BR')}<br>
+                <strong>Horário:</strong> ${hora}<br>
+                <strong>Nome:</strong> ${nome}<br>
+                <strong>Telefone:</strong> ${telefone}
+            `;
+
+            showScreen('confirmacao');
+        }
+
+        async function confirmarAgendamento() {
+            const params = new URLSearchParams();
+            params.append('barbeiro_id', agendamentoAtual.barbeiro_id);
+            params.append('servico_id', agendamentoAtual.servico_id);
+            params.append('cliente_nome', agendamentoAtual.nome);
+            params.append('cliente_telefone', agendamentoAtual.telefone);
+            params.append('data_hora', agendamentoAtual.data_hora);
+
+            const response = await fetch('/api/agendamentos?' + params, { method: 'POST' });
+            if (response.ok) {
+                alert('Agendamento confirmado! Você receberá uma mensagem no WhatsApp.');
+                document.getElementById('nome-input').value = '';
+                document.getElementById('telefone-input').value = '';
+                document.getElementById('barbeiro-select').value = '';
+                document.getElementById('servico-select').value = '';
+                document.getElementById('data-input').value = '';
+                document.getElementById('hora-select').value = '';
+                showScreen('home');
+            } else {
+                alert('Erro ao confirmar agendamento');
+            }
+        }
+
+        async function buscarAgendamentos() {
+            const telefone = document.getElementById('busca-telefone').value;
+            if (!telefone) {
+                alert('Digite um telefone');
+                return;
+            }
+
+            const response = await fetch('/api/agendamentos?telefone=' + encodeURIComponent(telefone));
+            const agendamentos = await response.json();
+            const lista = document.getElementById('lista-agendamentos');
+
+            if (agendamentos.length === 0) {
+                lista.innerHTML = '<p style="color: #666;">Nenhum agendamento encontrado</p>';
+                return;
+            }
+
+            lista.innerHTML = '';
+            agendamentos.forEach(ag => {
+                const servico = servicos.find(s => s.id == ag.servico_id);
+                const barbeiro = barbeiros.find(b => b.id == ag.barbeiro_id);
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.style.marginBottom = '1rem';
+                card.innerHTML = `
+                    <p><strong>Barbeiro:</strong> ${barbeiro ? barbeiro.nome : 'N/A'}</p>
+                    <p><strong>Serviço:</strong> ${servico ? servico.nome : 'N/A'}</p>
+                    <p><strong>Data/Hora:</strong> ${new Date(ag.data_hora).toLocaleString('pt-BR')}</p>
+                    <p><strong>Cliente:</strong> ${ag.cliente_nome}</p>
+                    <button class="cta-btn" style="width: 100%; margin-top: 1rem;" onclick="cancelarAgendamento(${ag.id})">Cancelar</button>
+                `;
+                lista.appendChild(card);
+            });
+        }
+
+        async function cancelarAgendamento(id) {
+            if (!confirm('Deseja cancelar este agendamento?')) return;
+
+            const response = await fetch('/api/agendamentos/' + id, { method: 'DELETE' });
+            if (response.ok) {
+                alert('Agendamento cancelado');
+                const telefone = document.getElementById('busca-telefone').value;
+                if (telefone) buscarAgendamentos();
+            } else {
+                const error = await response.json();
+                alert('Erro: ' + error.detail);
+            }
+        }
+
+        carregarBarbeiros();
+        carregarServicos();
+    </script>
+</body>
+</html>
+```
+
+```
+=== FILE: schema.sql ===
+```sql
+CREATE TABLE barbeiros (
+    id INTEGER PRIMARY KEY,
+    nome TEXT NOT NULL,
+    experiencia INTEGER NOT NULL,
+    especialidade TEXT NOT NULL
+);
+
+CREATE TABLE servicos (
+    id INTEGER PRIMARY KEY,
+    nome TEXT NOT NULL,
+    preco REAL NOT NULL,
+    duracao_min INTEGER NOT NULL
+);
+
+CREATE TABLE agendamentos (
+    id INTEGER PRIMARY KEY,
+    barbeiro_id INTEGER NOT NULL,
+    servico_id INTEGER NOT NULL,
+    cliente_nome TEXT NOT NULL,
+    cliente_telefone TEXT NOT NULL,
+    data_hora TIMESTAMP NOT NULL,
+    status TEXT DEFAULT 'pendente',
+    FOREIGN KEY (barbeiro_id) REFERENCES barbeiros(id),
+    FOREIGN KEY (servico_id) REFERENCES servicos(id)
+);
+```
