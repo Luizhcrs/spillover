@@ -4,7 +4,7 @@ from spillover.eviction.selector import (
 )
 
 
-def _t(idx, tokens, role="user", pinned=False, memory_type=None, is_system=False):
+def _t(idx, tokens, role="user", pinned=False, memory_type=None, is_system=False, density=0):
     return ActiveTurn(
         index=idx,
         token_count=tokens,
@@ -12,6 +12,7 @@ def _t(idx, tokens, role="user", pinned=False, memory_type=None, is_system=False
         pinned=pinned,
         memory_type=memory_type,
         is_system=is_system,
+        density=density,
     )
 
 
@@ -108,3 +109,33 @@ def test_pass3_keeps_partial_pass2_work_and_signals_pressure():
     assert result.budget_pressure is True
     assert result.evicted_indexes == [2]
     assert result.tokens_freed == 50
+
+
+def test_weighted_evicts_low_density_first():
+    turns = [
+        _t(0, 100, is_system=True),
+        _t(1, 200, density=10),  # weight=200/10=20 -> evict last
+        _t(2, 100),  # density=0 -> weight=100 -> evict first
+        _t(5, 50), _t(6, 50), _t(7, 50), _t(8, 50),
+    ]
+    result = select_for_eviction(turns, tokens_to_free=100, recent_buffer=4)
+    # Turn 2 (weight=100) should be evicted before turn 1 (weight=20)
+    assert result.evicted_indexes[0] == 2
+
+
+def test_pure_fifo_when_all_density_zero():
+    """With all density=0, original FIFO order must be preserved."""
+    turns = [
+        _t(0, 100, is_system=True),
+        _t(1, 200),
+        _t(2, 300),
+        _t(3, 100, memory_type="priority"),
+        _t(4, 400),
+        _t(5, 50),  # recent buffer
+        _t(6, 50),
+        _t(7, 50),
+        _t(8, 50),
+    ]
+    result = select_for_eviction(turns, tokens_to_free=400, recent_buffer=4)
+    assert result.evicted_indexes == [1, 2]
+    assert result.pass_used == 1

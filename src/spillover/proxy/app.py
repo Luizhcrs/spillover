@@ -196,6 +196,7 @@ def _maybe_evict(
             pinned=False,
             memory_type=None,
             is_system=False,
+            density=len(t.tool_calls),  # cheap proxy for semantic density v1
         )
         for i, t in enumerate(conv.turns)
     ]
