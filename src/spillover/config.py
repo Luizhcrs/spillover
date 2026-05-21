@@ -25,6 +25,7 @@ class Config:
     retriever_topk: int
     retriever_vector_k: int
     retriever_graph_k: int
+    retriever_bm25_k: int
     profile_default: str  # "coding" | "research" | "conversation" | "auto"
 
     @property
@@ -55,5 +56,6 @@ class Config:
             retriever_topk=int(os.environ.get("SPILLOVER_RETRIEVER_TOPK", "8")),
             retriever_vector_k=int(os.environ.get("SPILLOVER_RETRIEVER_VECTOR_K", "50")),
             retriever_graph_k=int(os.environ.get("SPILLOVER_RETRIEVER_GRAPH_K", "50")),
+            retriever_bm25_k=int(os.environ.get("SPILLOVER_RETRIEVER_BM25_K", "50")),
             profile_default=os.environ.get("SPILLOVER_PROFILE_DEFAULT", "auto"),
         )
