@@ -12,6 +12,7 @@ class Config:
     window_max: int
     db_root: Path
     upstream_base_url: str
+    openai_base_url: str
     ltm_budget_pct: float
     retriever_topk: int
     retriever_vector_k: int
@@ -28,6 +29,9 @@ class Config:
             ),
             upstream_base_url=os.environ.get(
                 "SPILLOVER_UPSTREAM_BASE_URL", "https://api.anthropic.com"
+            ),
+            openai_base_url=os.environ.get(
+                "SPILLOVER_OPENAI_BASE_URL", "https://api.openai.com"
             ),
             ltm_budget_pct=float(os.environ.get("SPILLOVER_LTM_BUDGET_PCT", "0.15")),
             retriever_topk=int(os.environ.get("SPILLOVER_RETRIEVER_TOPK", "8")),

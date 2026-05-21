@@ -7,11 +7,13 @@ def test_config_defaults(monkeypatch):
     monkeypatch.delenv("SPILLOVER_WINDOW_MAX", raising=False)
     monkeypatch.delenv("SPILLOVER_DB_ROOT", raising=False)
     monkeypatch.delenv("SPILLOVER_UPSTREAM_BASE_URL", raising=False)
+    monkeypatch.delenv("SPILLOVER_OPENAI_BASE_URL", raising=False)
     cfg = Config.from_env()
     assert cfg.port == 8787
     assert cfg.watermark == 0.85
     assert cfg.window_max == 200_000
     assert cfg.upstream_base_url == "https://api.anthropic.com"
+    assert cfg.openai_base_url == "https://api.openai.com"
     assert str(cfg.db_root).endswith(".spillover")
     assert cfg.ltm_budget_pct == 0.15
     assert cfg.retriever_topk == 8
