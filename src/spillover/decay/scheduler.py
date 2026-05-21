@@ -86,7 +86,7 @@ class DecayScheduler:
                 log.exception("decay tick failed")
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self.interval)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     async def _tick(self) -> None:

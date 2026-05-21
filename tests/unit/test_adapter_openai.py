@@ -1,5 +1,5 @@
-from spillover.adapters.openai import OpenAIAdapter
 from spillover.adapters.base import Conversation, ConversationTurn
+from spillover.adapters.openai import OpenAIAdapter
 
 
 def test_parse_basic():

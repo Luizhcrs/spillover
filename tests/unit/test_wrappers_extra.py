@@ -4,8 +4,8 @@ from unittest.mock import patch
 from click.testing import CliRunner
 
 from spillover.wrappers.codex import main as codex_main
-from spillover.wrappers.cursor import main as cursor_main
 from spillover.wrappers.continue_dev import main as continue_main
+from spillover.wrappers.cursor import main as cursor_main
 
 
 def _run(main, module_name: str, monkeypatch, tmp_path):

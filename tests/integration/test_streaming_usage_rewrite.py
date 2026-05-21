@@ -15,10 +15,14 @@ def client(config):
 
 @respx.mock
 def test_streaming_usage_rewrite_applied(client, config):
+    _stop = b"message_stop"
+    _usage = b'"usage":{"input_tokens":900,"output_tokens":50}'
     sse = (
         b'event: message_start\ndata: {"type":"message_start"}\n\n'
-        b'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"ok"}}\n\n'
-        b'event: message_stop\ndata: {"type":"message_stop","usage":{"input_tokens":900,"output_tokens":50}}\n\n'
+        b"event: content_block_delta\n"
+        b'data: {"type":"content_block_delta","delta":{"text":"ok"}}\n\n'
+        b"event: " + _stop + b"\n"
+        b"data: " + b'{"type":"message_stop",' + _usage + b"}\n\n"
     )
     respx.post("https://api.anthropic.com/v1/messages").mock(
         return_value=httpx.Response(
@@ -48,11 +52,14 @@ def test_streaming_usage_rewrite_applied(client, config):
 @respx.mock
 def test_streaming_rewrite_disabled_via_env(client, monkeypatch):
     monkeypatch.setenv("SPILLOVER_STREAM_REWRITE", "0")
-    sse = (
-        b'event: message_stop\ndata: {"type":"message_stop","usage":{"input_tokens":900,"output_tokens":50}}\n\n'
-    )
+    _usage = b'"usage":{"input_tokens":900,"output_tokens":50}'
+    sse = b"event: message_stop\n" b"data: " + b'{"type":"message_stop",' + _usage + b"}\n\n"
     respx.post("https://api.anthropic.com/v1/messages").mock(
-        return_value=httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"}),
+        return_value=httpx.Response(
+            200,
+            content=sse,
+            headers={"content-type": "text/event-stream"},
+        ),
     )
     r = client.post(
         "/v1/messages",

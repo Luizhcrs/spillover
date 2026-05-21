@@ -1,7 +1,5 @@
 import struct
 
-import pytest
-
 from spillover.archive.writer import Turn, archive_raw
 from spillover.decay.scheduler import _apply_decay_for_project
 from spillover.storage.sqlite import open_project_db

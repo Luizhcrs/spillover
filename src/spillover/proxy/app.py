@@ -31,7 +31,9 @@ from spillover.storage.kuzu import open_project_kuzu
 from spillover.storage.sqlite import open_project_db
 
 
-def _extract_usage_non_streaming(body: bytes, provider: str = "anthropic") -> tuple[int, int] | None:
+def _extract_usage_non_streaming(
+    body: bytes, provider: str = "anthropic"
+) -> tuple[int, int] | None:
     try:
         data = json.loads(body)
     except json.JSONDecodeError:

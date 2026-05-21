@@ -4,9 +4,11 @@ from spillover.counter_compact.sse_rewrite import rewrite_sse_body
 
 
 def test_rewrite_message_stop_usage():
+    _u = b'"usage":{"input_tokens":1000,"output_tokens":50}'
     body = (
         b'event: message_start\ndata: {"type":"message_start"}\n\n'
-        b'event: message_stop\ndata: {"type":"message_stop","usage":{"input_tokens":1000,"output_tokens":50}}\n\n'
+        b"event: message_stop\n"
+        b"data: " + b'{"type":"message_stop",' + _u + b"}\n\n"
     )
     out = rewrite_sse_body(body, 400)
     assert b"input_tokens" in out
@@ -22,8 +24,10 @@ def test_rewrite_message_stop_usage():
 
 
 def test_rewrite_message_delta_nested_usage():
+    _u = b'"usage":{"input_tokens":800}'
     body = (
-        b'event: message_delta\ndata: {"type":"message_delta","message":{"usage":{"input_tokens":800}}}\n\n'
+        b"event: message_delta\n"
+        b"data: " + b'{"type":"message_delta","message":{' + _u + b"}}\n\n"
     )
     out = rewrite_sse_body(body, 300)
     obj = None
