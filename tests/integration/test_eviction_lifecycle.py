@@ -11,7 +11,8 @@ from spillover.storage.sqlite import open_project_db
 
 @pytest.fixture
 def client(config):
-    return TestClient(create_app(config))
+    with TestClient(create_app(config)) as c:
+        yield c
 
 
 def _upstream_resp(input_tokens: int, output_tokens: int, text: str = "ok"):

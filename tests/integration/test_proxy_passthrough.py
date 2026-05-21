@@ -9,7 +9,8 @@ from spillover.proxy.app import create_app
 @pytest.fixture
 def client(config):
     app = create_app(config)
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 @respx.mock

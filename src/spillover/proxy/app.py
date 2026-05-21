@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
@@ -146,14 +147,17 @@ def _maybe_evict(
 
 
 def create_app(config: Config) -> FastAPI:
-    app = FastAPI(title="spillover", version="0.1.0")
-    app.add_middleware(ProjectIdMiddleware)
-    app.state.config = config
-    app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0))
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.config = config
+        app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0))
+        try:
+            yield
+        finally:
+            await app.state.http_client.aclose()
 
-    @app.on_event("shutdown")
-    async def _close():
-        await app.state.http_client.aclose()
+    app = FastAPI(title="spillover", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(ProjectIdMiddleware)
 
     @app.post("/v1/messages")
     async def messages(request: Request):
