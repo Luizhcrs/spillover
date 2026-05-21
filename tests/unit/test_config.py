@@ -21,7 +21,7 @@ def test_config_defaults(monkeypatch):
     assert cfg.openai_base_url == "https://api.openai.com"
     assert str(cfg.db_root).endswith(".spillover")
     assert cfg.ltm_budget_pct == 0.15
-    assert cfg.retriever_topk == 8
+    assert cfg.retriever_topk == 5
     assert cfg.retriever_vector_k == 50
     assert cfg.retriever_graph_k == 50
     assert cfg.retriever_bm25_k == 50

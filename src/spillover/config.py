@@ -53,7 +53,7 @@ class Config:
             ltm_pct=ltm,
             scratchpad_pct=float(os.environ.get("SPILLOVER_SCRATCHPAD_PCT", "0.11")),
             ltm_budget_pct=ltm,
-            retriever_topk=int(os.environ.get("SPILLOVER_RETRIEVER_TOPK", "8")),
+            retriever_topk=int(os.environ.get("SPILLOVER_RETRIEVER_TOPK", "5")),
             retriever_vector_k=int(os.environ.get("SPILLOVER_RETRIEVER_VECTOR_K", "50")),
             retriever_graph_k=int(os.environ.get("SPILLOVER_RETRIEVER_GRAPH_K", "50")),
             retriever_bm25_k=int(os.environ.get("SPILLOVER_RETRIEVER_BM25_K", "50")),
