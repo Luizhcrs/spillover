@@ -7,14 +7,21 @@ from spillover.retriever.vector import Hit
 
 # Lightweight tokenizer for query sanitization. FTS5 MATCH syntax is sensitive
 # to special chars and operators; we extract bag-of-words and OR-join.
-_TOKEN = re.compile(r"[A-Za-z0-9_]{2,}")
+# Includes ./-_: in token to match FTS5 schema tokenchars — preserves compound
+# tokens like "0.85", "char/4", "letsencryptresolver", "middleware.py".
+_TOKEN = re.compile(r"[A-Za-z0-9_./\-:]{2,}")
 
 
 def _query_to_fts(query: str) -> str:
     tokens = _TOKEN.findall(query)
     if not tokens:
         return ""
-    return " OR ".join(f'"{t}"' for t in tokens)
+    # Strip trailing punctuation to keep tokens clean
+    cleaned = [t.strip("./-_:") for t in tokens]
+    cleaned = [t for t in cleaned if len(t) >= 2]
+    if not cleaned:
+        return ""
+    return " OR ".join(f'"{t}"' for t in cleaned)
 
 
 def bm25_topk(
