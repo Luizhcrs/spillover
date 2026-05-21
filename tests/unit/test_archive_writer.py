@@ -75,3 +75,25 @@ def test_archive_raw_handles_race_on_hash(tmp_path):
         assert count == 1
     finally:
         db.close()
+
+
+def test_archive_raw_compaction_rescued_flag(tmp_path):
+    db = open_project_db(tmp_path, "p1")
+    try:
+        turn = Turn(
+            project_id="p1",
+            role="assistant",
+            content="rescued",
+            tool_calls=[],
+            code_refs=[],
+            token_count=2,
+            ts=1,
+            compaction_rescued=True,
+        )
+        eid = archive_raw(db, turn)
+        row = db.execute(
+            "SELECT compaction_rescued FROM episodes WHERE id = ?", (eid,)
+        ).fetchone()
+        assert row["compaction_rescued"] == 1
+    finally:
+        db.close()

@@ -17,6 +17,7 @@ class Turn:
     code_refs: list[dict] = field(default_factory=list)
     token_count: int = 0
     ts: int = 0
+    compaction_rescued: bool = False
 
 
 def _hash_turn(turn: Turn) -> str:
@@ -43,8 +44,8 @@ def archive_raw(db: sqlite3.Connection, turn: Turn) -> str:
             """
             INSERT INTO episodes (
                 id, project_id, role, content_json, tool_calls_json,
-                code_refs_json, token_count, ts, hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                code_refs_json, token_count, ts, hash, compaction_rescued
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 eid,
@@ -56,6 +57,7 @@ def archive_raw(db: sqlite3.Connection, turn: Turn) -> str:
                 turn.token_count,
                 turn.ts,
                 h,
+                1 if turn.compaction_rescued else 0,
             ),
         )
         return eid
