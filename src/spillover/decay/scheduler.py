@@ -15,6 +15,7 @@ HALF_LIFE_HOURS = {
     "procedural": 30 * 24,
     "semantic": 14 * 24,
     "episodic": 7 * 24,
+    "task": 90 * 24,
 }
 
 
@@ -39,6 +40,7 @@ def _apply_decay_for_project(db_root: Path, project_id: str) -> int:
             half_life = HALF_LIFE_HOURS.get(r["memory_type"], 24)
             decay = math.exp(-age_hours / half_life)
             base = {
+                "task": 0.95,
                 "priority": 1.0,
                 "procedural": 0.7,
                 "semantic": 0.6,

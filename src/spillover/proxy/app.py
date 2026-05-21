@@ -148,11 +148,23 @@ def _retrieve_ltm_block(
                 _log.exception("graph walk failed project=%s", project_id)
 
         b_hits = bm25_topk(db, query_text, k=config.retriever_bm25_k)
-        fused = rrf_fuse(v_hits, g_hits, b_hits)[: config.retriever_topk]
+        # Causal leg: use BM25/vector top hit episode ids as seeds
+        seed_ids = [h.episode_id for h in (v_hits[:3] + b_hits[:3])]
+        c_hits: list = []
+        if seed_ids:
+            try:
+                kuzu_conn = open_project_kuzu(config.db_root, project_id)
+                from spillover.retriever.causal import causality_chain
+                c_hits = causality_chain(kuzu_conn, seed_ids, depth=2)
+            except Exception:
+                _log.exception("causal walk failed project=%s", project_id)
+
+        fused = rrf_fuse(v_hits, g_hits, b_hits, c_hits)[: config.retriever_topk]
         from spillover.metrics.registry import retriever_hits_total
         retriever_hits_total.labels(project=project_id, source="vector").inc(len(v_hits))
         retriever_hits_total.labels(project=project_id, source="graph").inc(len(g_hits))
         retriever_hits_total.labels(project=project_id, source="bm25").inc(len(b_hits))
+        retriever_hits_total.labels(project=project_id, source="causal").inc(len(c_hits))
         if inbound_payload is not None:
             budget = _ltm_budget_for(config, inbound_payload)
         else:
@@ -201,6 +213,31 @@ def _inject_ltm(payload: dict, ltm_text: str) -> None:
             else:
                 msg["content"] = ltm_text
             return
+        payload["system"] = ltm_text
+        return
+
+    if placement == "between":
+        messages = payload.get("messages") or []
+        if not messages:
+            payload["system"] = ltm_text
+            return
+        # Find the LAST user message and insert the synthetic pair BEFORE it
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                synthetic = [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Before answering, recall the following retrieved from "
+                            "long-term memory of this project."
+                        ),
+                    },
+                    {"role": "assistant", "content": ltm_text},
+                ]
+                payload["messages"] = (
+                    list(messages[:i]) + synthetic + list(messages[i:])
+                )
+                return
         payload["system"] = ltm_text
         return
 

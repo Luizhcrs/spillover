@@ -30,11 +30,12 @@ def _floats_to_bytes(v: list[float]) -> bytes:
 
 def _base_importance(memory_type: str, tool_call_count: int) -> float:
     base = {
+        "task": 0.95,
         "priority": 1.0,
         "procedural": 0.7,
         "semantic": 0.6,
         "episodic": 0.5,
-    }[memory_type]
+    }.get(memory_type, 0.5)
     return min(1.0, base + 0.05 * tool_call_count)
 
 
@@ -101,6 +102,19 @@ def _process_one(event: FacetEvent) -> None:
             "imp": importance,
         },
     )
+    # Link this episode to the previous one in temporal order (if any)
+    prev = kuzu_conn.execute(
+        "MATCH (e:Episode) WHERE e.ts < $ts "
+        "RETURN e.id, e.ts ORDER BY e.ts DESC LIMIT 1",
+        {"ts": ts},
+    )
+    if prev.has_next():
+        prev_id, _ = prev.get_next()
+        kuzu_conn.execute(
+            "MATCH (a:Episode {id: $a}), (b:Episode {id: $b}) "
+            "MERGE (a)-[:AFTER]->(b)",
+            {"a": prev_id, "b": event.episode_id},
+        )
     for ent in extract_entities(content):
         kuzu_conn.execute(
             "MERGE (n:Entity {name: $name}) SET n.kind = $kind",

@@ -185,5 +185,117 @@ def bench(tasks: str, report: str, run: bool, proxy_url: str, vanilla_url: str,
     click.echo(f"wrote {report_path} and {raw_path}")
 
 
+@main.command(name="bench-long")
+@click.option("--proxy-url", default="http://127.0.0.1:8787")
+@click.option("--vanilla-url", default="https://api.anthropic.com")
+@click.option("--report", default="bench-long-report.md")
+@click.option("--model", default="claude-haiku-4-5-20251001")
+def bench_long(proxy_url: str, vanilla_url: str, report: str, model: str):
+    """Run the long-conversation bench (anchor facts embedded mid-history)."""
+    import json
+    import os
+    import uuid
+
+    from spillover.bench.long_conversation import (
+        all_scenarios,
+        render_report,
+        run_spillover,
+        run_vanilla_truncated,
+    )
+
+    auth = os.environ.get("ANTHROPIC_API_KEY")
+    if auth and not auth.startswith("Bearer "):
+        auth = f"Bearer {auth}"
+    if not auth:
+        cred_path = Path.home() / ".claude" / ".credentials.json"
+        if cred_path.exists():
+            data = json.loads(cred_path.read_text(encoding="utf-8"))
+            tok = data.get("claudeAiOauth", {}).get("accessToken")
+            if tok:
+                auth = f"Bearer {tok}"
+    if not auth:
+        click.echo("No auth available.", err=True)
+        raise SystemExit(2)
+
+    pid = hashlib.sha1(uuid.uuid4().bytes).hexdigest()
+    proxy_with_proj = f"{proxy_url.rstrip('/')}/p/{pid}"
+    click.echo(f"project: {pid}")
+
+    results = []
+    for sc in all_scenarios():
+        click.echo(f"-> scenario {sc.id}")
+        results.append(run_vanilla_truncated(sc, vanilla_url, auth, model))
+        results.append(run_spillover(sc, proxy_with_proj, auth, model))
+
+    Path(report).write_text(render_report(results), encoding="utf-8")
+    from dataclasses import asdict
+    raw = Path(report).with_suffix(".jsonl")
+    with raw.open("w", encoding="utf-8") as f:
+        for r in results:
+            f.write(json.dumps(asdict(r)) + "\n")
+    click.echo(f"wrote {report} and {raw}")
+
+
+@main.command(name="bench-logic")
+@click.option("--proxy-url", default="http://127.0.0.1:8787")
+@click.option("--vanilla-url", default="https://api.anthropic.com")
+@click.option("--report", default="bench-logic-report.md")
+@click.option("--model", default="claude-haiku-4-5-20251001")
+@click.option("--keep-last-n", default=8,
+              help="vanilla mode: how many tail turns to keep when simulating compaction")
+def bench_logic(proxy_url: str, vanilla_url: str, report: str, model: str, keep_last_n: int):
+    """Run the landing-page logic-retention scenario per-detail."""
+    import json
+    import os
+    import uuid
+
+    from spillover.bench.landing_page_scenario import (
+        LANDING_PAGE_DETAILS,
+        build_landing_page_history,
+        render_logic_report,
+        run_logic_check,
+    )
+
+    auth = os.environ.get("ANTHROPIC_API_KEY")
+    if auth and not auth.startswith("Bearer "):
+        auth = f"Bearer {auth}"
+    if not auth:
+        cred_path = Path.home() / ".claude" / ".credentials.json"
+        if cred_path.exists():
+            data = json.loads(cred_path.read_text(encoding="utf-8"))
+            tok = data.get("claudeAiOauth", {}).get("accessToken")
+            if tok:
+                auth = f"Bearer {tok}"
+    if not auth:
+        click.echo("No auth available.", err=True)
+        raise SystemExit(2)
+
+    history = build_landing_page_history()
+    truncated = history[-keep_last_n:]
+
+    pid = hashlib.sha1(uuid.uuid4().bytes).hexdigest()
+    proxy_with_proj = f"{proxy_url.rstrip('/')}/p/{pid}"
+    click.echo(f"project: {pid}")
+    click.echo(f"history: {len(history)} turns")
+    click.echo(f"running {len(LANDING_PAGE_DETAILS)} detail checks per mode")
+
+    results = []
+    for d in LANDING_PAGE_DETAILS:
+        click.echo(f"-> {d.name}")
+        results.append(run_logic_check(truncated, d, vanilla_url, auth, model, "vanilla_truncated"))
+        results.append(run_logic_check(
+            history, d, proxy_with_proj, auth, model, "spillover",
+            extra_headers={"anthropic-beta": "oauth-2025-04-20"},
+        ))
+
+    Path(report).write_text(render_logic_report(results), encoding="utf-8")
+    from dataclasses import asdict
+    raw = Path(report).with_suffix(".jsonl")
+    with raw.open("w", encoding="utf-8") as f:
+        for r in results:
+            f.write(json.dumps(asdict(r)) + "\n")
+    click.echo(f"wrote {report} and {raw}")
+
+
 if __name__ == "__main__":
     main()

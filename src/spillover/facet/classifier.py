@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-MemoryType = Literal["procedural", "episodic", "semantic", "priority"]
+from spillover.facet.tasks import has_open_task
+
+MemoryType = Literal["procedural", "episodic", "semantic", "priority", "task"]
 
 _PRIORITY_MARKERS = re.compile(
     r"(?i)\b(remember this|lembra disso|important|importante|never|nunca|always|sempre)\b"
@@ -32,6 +34,8 @@ def classify(content: Any, tool_calls: list[dict] | None = None) -> MemoryType:
     text = _content_to_text(content)
     has_tools = bool(tool_calls)
 
+    if has_open_task(content):
+        return "task"
     if _PRIORITY_MARKERS.search(text):
         return "priority"
     if has_tools or _PROCEDURAL_MARKERS.search(text):
