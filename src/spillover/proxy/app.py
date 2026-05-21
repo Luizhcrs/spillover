@@ -204,6 +204,31 @@ def _inject_ltm(payload: dict, ltm_text: str) -> None:
         payload["system"] = ltm_text
         return
 
+    if placement == "between":
+        messages = payload.get("messages") or []
+        if not messages:
+            payload["system"] = ltm_text
+            return
+        # Find the LAST user message and insert the synthetic pair BEFORE it
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                synthetic = [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Before answering, recall the following retrieved from "
+                            "long-term memory of this project."
+                        ),
+                    },
+                    {"role": "assistant", "content": ltm_text},
+                ]
+                payload["messages"] = (
+                    list(messages[:i]) + synthetic + list(messages[i:])
+                )
+                return
+        payload["system"] = ltm_text
+        return
+
     # placement == "turns" — materialise as a synthetic conversation pair
     messages = payload.get("messages") or []
     if not messages:
