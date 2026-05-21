@@ -516,5 +516,96 @@ def bench_barbershop(proxy_url: str, vanilla_url: str, report: str, out_dir: str
     click.echo(f"wrote {report}, {raw}, {out}/vanilla/*, {out}/spillover/*")
 
 
+@main.command(name="bench-cc-realistic")
+@click.option("--proxy-url", default="http://127.0.0.1:8787")
+@click.option("--vanilla-url", default="https://api.anthropic.com")
+@click.option("--report", default="bench-cc-realistic-report.md")
+@click.option("--out-dir", default="docs/eval/cc-realistic-ab/")
+@click.option("--model", default="claude-haiku-4-5-20251001")
+@click.option("--turns", default=500, type=int)
+@click.option("--compaction-threshold-turns", default=80, type=int,
+              help="vanilla: a cada N turnos, dispara compaction")
+@click.option("--target-summary-tokens", default=400, type=int)
+@click.option("--keep-tail-turns", default=20, type=int)
+def bench_cc_realistic(proxy_url: str, vanilla_url: str, report: str, out_dir: str,
+                       model: str, turns: int, compaction_threshold_turns: int,
+                       target_summary_tokens: int, keep_tail_turns: int):
+    """A/B contra Claude Code REAL (com compaction via LLM summary)."""
+    import hashlib
+    import json
+    import os
+    import uuid
+
+    from spillover.bench.cc_realistic_ab import (
+        _build_long_history,
+        render_report,
+        run_cc_realistic,
+        run_spillover_full,
+    )
+
+    auth = os.environ.get("ANTHROPIC_API_KEY")
+    if auth and not auth.startswith("Bearer "):
+        auth = f"Bearer {auth}"
+    if not auth:
+        cred_path = Path.home() / ".claude" / ".credentials.json"
+        if cred_path.exists():
+            data = json.loads(cred_path.read_text(encoding="utf-8"))
+            tok = data.get("claudeAiOauth", {}).get("accessToken")
+            if tok:
+                auth = f"Bearer {tok}"
+    if not auth:
+        click.echo("No auth available.", err=True)
+        raise SystemExit(2)
+
+    history = _build_long_history(turns)
+    chars = sum(len(t["content"]) for t in history)
+    click.echo(f"history: {len(history)} turnos, ~{chars} chars")
+
+    pid = hashlib.sha1(uuid.uuid4().bytes).hexdigest()
+    proxy_with_proj = f"{proxy_url.rstrip('/')}/p/{pid}"
+    click.echo(f"project: {pid}")
+
+    click.echo(f"-> cc_realistic (compaction a cada {compaction_threshold_turns} turnos)")
+    v = run_cc_realistic(
+        history, vanilla_url, auth, model,
+        compaction_threshold_turns=compaction_threshold_turns,
+        target_summary_tokens=target_summary_tokens,
+        keep_tail_turns=keep_tail_turns,
+    )
+    click.echo(
+        f"   {len(v.anchors_hit)}/{len(v.anchors_hit) + len(v.anchors_missed)} anchors, "  # noqa: E501
+        f"{v.compaction_events} compactions, "
+        f"${v.total_cost_usd_est:.4f}, {v.latency_ms}ms"
+    )
+
+    click.echo("-> spillover (full history)")
+    s = run_spillover_full(history, proxy_with_proj, auth, model)
+    click.echo(
+        f"   {len(s.anchors_hit)}/{len(s.anchors_hit) + len(s.anchors_missed)} anchors, "  # noqa: E501
+        f"{s.real_input_tokens} real / {s.input_tokens_final} visible, "
+        f"${s.total_cost_usd_est:.4f}, {s.latency_ms}ms"
+    )
+
+    out = Path(out_dir)
+    (out / "vanilla").mkdir(parents=True, exist_ok=True)
+    (out / "spillover").mkdir(parents=True, exist_ok=True)
+    (out / "vanilla" / "raw_output.txt").write_text(v.output, encoding="utf-8")
+    (out / "spillover" / "raw_output.txt").write_text(s.output, encoding="utf-8")
+    for name, content in v.files_extracted.items():
+        (out / "vanilla" / name).write_text(content, encoding="utf-8")
+    for name, content in s.files_extracted.items():
+        (out / "spillover" / name).write_text(content, encoding="utf-8")
+
+    Path(report).write_text(render_report([v, s]), encoding="utf-8")
+    from dataclasses import asdict
+    raw = Path(report).with_suffix(".jsonl")
+    with raw.open("w", encoding="utf-8") as f:
+        for r in [v, s]:
+            d = asdict(r)
+            d.pop("files_extracted", None)
+            f.write(json.dumps(d) + "\n")
+    click.echo(f"wrote {report}, {raw}, {out}/vanilla/*, {out}/spillover/*")
+
+
 if __name__ == "__main__":
     main()

@@ -1,0 +1,676 @@
+```
+=== FILE: backend.py ===
+
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime, timedelta
+import sqlite3
+import json
+from typing import Optional
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+DATABASE = "barbearia.db"
+
+def init_db():
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS barbeiros (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        experiencia INTEGER NOT NULL,
+        especialidade TEXT NOT NULL
+    )
+    ''')
+    
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS servicos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        preco REAL NOT NULL,
+        duracao_min INTEGER NOT NULL
+    )
+    ''')
+    
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS agendamentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        barbeiro_id INTEGER NOT NULL,
+        servico_id INTEGER NOT NULL,
+        cliente_nome TEXT NOT NULL,
+        cliente_telefone TEXT NOT NULL,
+        data_hora TEXT NOT NULL,
+        status TEXT NOT NULL,
+        FOREIGN KEY (barbeiro_id) REFERENCES barbeiros(id),
+        FOREIGN KEY (servico_id) REFERENCES servicos(id)
+    )
+    ''')
+    
+    cursor.execute('SELECT COUNT(*) FROM barbeiros')
+    if cursor.fetchone()[0] == 0:
+        barbeiros_data = [
+            ('Joao', 15, 'degrade'),
+            ('Pedro', 8, 'barba/bigode'),
+            ('Carlos', 5, 'cortes jovens')
+        ]
+        cursor.executemany('INSERT INTO barbeiros (nome, experiencia, especialidade) VALUES (?, ?, ?)', barbeiros_data)
+    
+    cursor.execute('SELECT COUNT(*) FROM servicos')
+    if cursor.fetchone()[0] == 0:
+        servicos_data = [
+            ('Corte Masculino', 45.0, 30),
+            ('Barba Completa', 35.0, 30),
+            ('Combo Cabelo+Barba', 75.0, 60),
+            ('Pigmentacao', 90.0, 90),
+            ('Sobrancelha', 20.0, 15)
+        ]
+        cursor.executemany('INSERT INTO servicos (nome, preco, duracao_min) VALUES (?, ?, ?)', servicos_data)
+    
+    conn.commit()
+    conn.close()
+
+init_db()
+
+@app.get("/api/barbeiros")
+def get_barbeiros():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, nome, experiencia, especialidade FROM barbeiros')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+@app.get("/api/servicos")
+def get_servicos():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, nome, preco, duracao_min FROM servicos')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+@app.post("/api/agendamentos")
+def create_agendamento(data: dict):
+    barbeiro_id = data.get('barbeiro_id')
+    servico_id = data.get('servico_id')
+    cliente_nome = data.get('cliente_nome')
+    cliente_telefone = data.get('cliente_telefone')
+    data_hora = data.get('data_hora')
+    
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    cursor.execute('INSERT INTO agendamentos (barbeiro_id, servico_id, cliente_nome, cliente_telefone, data_hora, status) VALUES (?, ?, ?, ?, ?, ?)',
+                   (barbeiro_id, servico_id, cliente_nome, cliente_telefone, data_hora, 'confirmado'))
+    
+    agendamento_id = cursor.lastrowid
+    conn.commit()
+    
+    cursor.execute('SELECT nome FROM barbeiros WHERE id = ?', (barbeiro_id,))
+    barbeiro_nome = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT nome, preco FROM servicos WHERE id = ?', (servico_id,))
+    servico_row = cursor.fetchone()
+    servico_nome = servico_row[0]
+    servico_preco = servico_row[1]
+    
+    conn.close()
+    
+    print(f"[WhatsApp Mock] Enviando para {cliente_telefone}: Agendamento confirmado com {barbeiro_nome} para {servico_nome} (R${servico_preco}) em {data_hora}")
+    
+    return {
+        'id': agendamento_id,
+        'barbeiro_id': barbeiro_id,
+        'servico_id': servico_id,
+        'cliente_nome': cliente_nome,
+        'cliente_telefone': cliente_telefone,
+        'data_hora': data_hora,
+        'status': 'confirmado'
+    }
+
+@app.delete("/api/agendamentos/{agendamento_id}")
+def delete_agendamento(agendamento_id: int):
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT data_hora FROM agendamentos WHERE id = ?', (agendamento_id,))
+    row = cursor.fetchone()
+    
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Agendamento nao encontrado")
+    
+    data_hora_str = row[0]
+    data_hora = datetime.fromisoformat(data_hora_str)
+    agora = datetime.now()
+    diff = (data_hora - agora).total_seconds() / 3600
+    
+    if diff < 1:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Cancelamento nao permitido: menos de 1 hora antes")
+    
+    cursor.execute('DELETE FROM agendamentos WHERE id = ?', (agendamento_id,))
+    conn.commit()
+    conn.close()
+    
+    return {'mensagem': 'Agendamento cancelado'}
+
+@app.get("/api/agendamentos")
+def get_agendamentos(telefone: Optional[str] = None):
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    if telefone:
+        cursor.execute('SELECT id, barbeiro_id, servico_id, cliente_nome, cliente_telefone, data_hora, status FROM agendamentos WHERE cliente_telefone = ?', (telefone,))
+    else:
+        cursor.execute('SELECT id, barbeiro_id, servico_id, cliente_nome, cliente_telefone, data_hora, status FROM agendamentos')
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+@app.get("/")
+def serve_frontend():
+    return FileResponse("frontend.html", media_type="text/html")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+```
+=== FILE: frontend.html ===
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barbearia Tres Tesouras</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        h1, h2, h3, .titulo {
+            font-family: 'Playfair Display', serif;
+        }
+        .nav-link {
+            transition: all 200ms;
+        }
+        .nav-link:hover {
+            transform: scale(1.02);
+        }
+        .card {
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            transition: all 200ms;
+        }
+        .card:hover {
+            transform: scale(1.02);
+        }
+        .btn {
+            border-radius: 24px;
+            transition: all 200ms;
+        }
+        .btn:hover {
+            transform: scale(1.02);
+        }
+        .btn-primary {
+            background-color: #1a1a1a;
+            color: #d4a574;
+        }
+        .btn-secondary {
+            background-color: #d4a574;
+            color: #1a1a1a;
+        }
+        .bg-primary {
+            background-color: #1a1a1a;
+        }
+        .text-primary {
+            color: #1a1a1a;
+        }
+        .bg-secondary {
+            background-color: #d4a574;
+        }
+        .text-secondary {
+            color: #d4a574;
+        }
+        .bg-light {
+            background-color: #f5f1ea;
+        }
+        @media (max-width: 768px) {
+            .container-responsive {
+                padding: 0 1rem;
+            }
+            .grid-responsive {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="fixed top-0 left-0 right-0 bg-primary text-secondary z-50 shadow-lg">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-2 cursor-pointer" onclick="navigateTo('home')">
+                <span class="text-2xl">✂️</span>
+                <h1 class="text-xl font-bold">Tres Tesouras</h1>
+            </div>
+            <div class="hidden md:flex gap-6">
+                <a onclick="navigateTo('home')" class="nav-link cursor-pointer">Home</a>
+                <a onclick="navigateTo('agendar')" class="nav-link cursor-pointer">Agendar</a>
+                <a onclick="navigateTo('meus-agendamentos')" class="nav-link cursor-pointer">Meus Agendamentos</a>
+                <a onclick="navigateTo('sobre')" class="nav-link cursor-pointer">Sobre</a>
+            </div>
+            <button onclick="navigateTo('agendar')" class="btn btn-secondary px-6 py-2 font-semibold">Agendar Agora</button>
+        </div>
+    </nav>
+
+    <div id="app" class="pt-20">
+        <div id="home" class="screen">
+            <section class="bg-primary text-secondary py-20">
+                <div class="max-w-6xl mx-auto px-4 text-center">
+                    <h1 class="text-5xl font-bold mb-4">Bem-vindo à Barbearia Tres Tesouras</h1>
+                    <p class="text-lg mb-8">Os melhores barbeiros de São Paulo estão aqui para você</p>
+                    <button onclick="navigateTo('agendar')" class="btn btn-secondary px-8 py-3 font-semibold text-lg">Agendar Agora</button>
+                </div>
+            </section>
+
+            <section class="py-16 max-w-6xl mx-auto px-4">
+                <h2 class="titulo text-4xl mb-8 text-primary">Nossos Barbeiros</h2>
+                <div id="barbeiros-list" class="grid grid-cols-1 md:grid-cols-3 gap-6"></div>
+            </section>
+
+            <section class="py-16 bg-primary text-secondary">
+                <div class="max-w-6xl mx-auto px-4">
+                    <h2 class="titulo text-4xl mb-8">Nossos Serviços</h2>
+                    <div id="servicos-list" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+                </div>
+            </section>
+
+            <section class="py-16 max-w-6xl mx-auto px-4">
+                <h2 class="titulo text-4xl mb-8 text-primary">Por que escolher a gente?</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="card bg-light p-6 border-l-4 border-secondary">
+                        <h3 class="text-xl font-bold text-primary mb-2">Experiência</h3>
+                        <p class="text-gray-700">Nossos barbeiros têm anos de experiência no mercado</p>
+                    </div>
+                    <div class="card bg-light p-6 border-l-4 border-secondary">
+                        <h3 class="text-xl font-bold text-primary mb-2">Qualidade</h3>
+                        <p class="text-gray-700">Utilizamos os melhores produtos do mercado</p>
+                    </div>
+                    <div class="card bg-light p-6 border-l-4 border-secondary">
+                        <h3 class="text-xl font-bold text-primary mb-2">Agendamento Fácil</h3>
+                        <p class="text-gray-700">Agende pelo nosso site em apenas alguns cliques</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <div id="agendar" class="screen hidden">
+            <div class="max-w-2xl mx-auto px-4 py-16">
+                <h1 class="titulo text-4xl mb-8 text-primary">Agendar Horário</h1>
+                
+                <div class="card bg-white p-8 mb-6">
+                    <div class="mb-6">
+                        <label class="block text-primary font-semibold mb-2">Seu Nome</label>
+                        <input id="cliente_nome" type="text" class="w-full border border-gray-300 rounded-lg p-3" placeholder="Digite seu nome">
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-primary font-semibold mb-2">Seu Telefone</label>
+                        <input id="cliente_telefone" type="tel" class="w-full border border-gray-300 rounded-lg p-3" placeholder="(11) 98765-4321">
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-primary font-semibold mb-2">Selecione o Serviço</label>
+                        <select id="servico_select" class="w-full border border-gray-300 rounded-lg p-3">
+                            <option value="">Escolha um serviço</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-primary font-semibold mb-2">Selecione o Barbeiro</label>
+                        <select id="barbeiro_select" class="w-full border border-gray-300 rounded-lg p-3">
+                            <option value="">Escolha um barbeiro</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-primary font-semibold mb-2">Data e Hora</label>
+                        <input id="data_hora" type="datetime-local" class="w-full border border-gray-300 rounded-lg p-3">
+                        <p class="text-sm text-gray-600 mt-2">Horário de funcionamento: Terça a Sábado, 9h às 19h</p>
+                        <p class="text-sm text-gray-600">Agendamentos em slots de 30 minutos</p>
+                    </div>
+
+                    <button onclick="agendar()" class="btn btn-primary w-full py-3 font-semibold text-lg text-secondary">Confirmar Agendamento</button>
+                    <button onclick="navigateTo('home')" class="btn btn-secondary w-full py-3 font-semibold text-lg mt-3 text-primary">Cancelar</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="confirmacao" class="screen hidden">
+            <div class="max-w-2xl mx-auto px-4 py-16">
+                <div class="card bg-white p-8 text-center">
+                    <div class="text-6xl mb-4">✅</div>
+                    <h1 class="titulo text-4xl mb-4 text-primary">Agendamento Confirmado!</h1>
+                    <div id="confirmacao-detalhes" class="text-left bg-light p-6 rounded-lg mb-6 text-primary">
+                    </div>
+                    <p class="text-gray-700 mb-6">Um link de confirmação foi enviado via WhatsApp</p>
+                    <button onclick="navigateTo('home')" class="btn btn-primary px-8 py-3 font-semibold text-secondary">Voltar ao Início</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="meus-agendamentos" class="screen hidden">
+            <div class="max-w-4xl mx-auto px-4 py-16">
+                <h1 class="titulo text-4xl mb-8 text-primary">Meus Agendamentos</h1>
+                
+                <div class="mb-6">
+                    <label class="block text-primary font-semibold mb-2">Digite seu telefone</label>
+                    <input id="telefone_consulta" type="tel" class="w-full border border-gray-300 rounded-lg p-3 mb-3" placeholder="(11) 98765-4321">
+                    <button onclick="consultarAgendamentos()" class="btn btn-primary px-6 py-2 font-semibold text-secondary">Consultar</button>
+                </div>
+
+                <div id="agendamentos-list" class="space-y-4"></div>
+            </div>
+        </div>
+
+        <div id="sobre" class="screen hidden">
+            <div class="max-w-4xl mx-auto px-4 py-16">
+                <h1 class="titulo text-4xl mb-8 text-primary">Sobre Nós</h1>
+                
+                <div class="card bg-white p-8 mb-6">
+                    <h2 class="text-2xl font-bold text-primary mb-4">Barbearia Tres Tesouras</h2>
+                    <p class="text-gray-700 mb-4">Localização: Rua das Palmeiras 123, São Paulo - SP</p>
+                    <p class="text-gray-700 mb-4">Telefone: (11) 98765-4321</p>
+                    <p class="text-gray-700 mb-4">Funcionamento: Terça a Sábado, 9h às 19h</p>
+                </div>
+
+                <div class="card bg-light p-8">
+                    <h2 class="text-2xl font-bold text-primary mb-4">Nossa História</h2>
+                    <p class="text-gray-700 mb-4">
+                        A Barbearia Tres Tesouras é um estabelecimento tradicional dedicado a oferecer os melhores serviços de barbearia em São Paulo. 
+                        Com uma equipe de barbeiros experientes e especializados, nos comprometemos a proporcionar uma experiência única e satisfatória.
+                    </p>
+                    <p class="text-gray-700">
+                        Cada um de nossos barbeiros traz sua expertise e dedicação para garantir que você saia daqui satisfeito.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-primary text-secondary py-12 mt-12">
+        <div class="max-w-6xl mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div>
+                <h3 class="font-bold mb-4">Contato</h3>
+                <p>Rua das Palmeiras 123</p>
+                <p>São Paulo - SP</p>
+                <p>(11) 98765-4321</p>
+            </div>
+            <div>
+                <h3 class="font-bold mb-4">Horário</h3>
+                <p>Terça a Sábado</p>
+                <p>9h às 19h</p>
+            </div>
+            <div>
+                <h3 class="font-bold mb-4">Redes Sociais</h3>
+                <p>Instagram: @trestesourassp</p>
+                <p>Facebook: Barbearia Tres Tesouras</p>
+            </div>
+        </div>
+        <div class="text-center mt-8 pt-8 border-t border-secondary/30">
+            <p>&copy; 2024 Barbearia Tres Tesouras. Todos os direitos reservados.</p>
+        </div>
+    </footer>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api';
+
+        let barbeiros = [];
+        let servicos = [];
+        let agendamentosAtual = [];
+
+        async function carregarDados() {
+            try {
+                const respBarbeiros = await fetch(`${API_BASE}/barbeiros`);
+                barbeiros = await respBarbeiros.json();
+
+                const respServicos = await fetch(`${API_BASE}/servicos`);
+                servicos = await respServicos.json();
+
+                renderizarBarbeirosHome();
+                renderizarServicosHome();
+                preencherSelects();
+            } catch (err) {
+                console.error('Erro ao carregar dados:', err);
+            }
+        }
+
+        function renderizarBarbeirosHome() {
+            const container = document.getElementById('barbeiros-list');
+            container.innerHTML = barbeiros.map(b => `
+                <div class="card bg-white p-6 text-center">
+                    <img src="https://placehold.co/200x200/1a1a1a/d4a574?text=${b.nome}" alt="${b.nome}" class="w-32 h-32 mx-auto rounded-full mb-4">
+                    <h3 class="text-xl font-bold text-primary mb-2">${b.nome}</h3>
+                    <p class="text-secondary font-semibold mb-2">${b.especialidade}</p>
+                    <p class="text-gray-700">${b.experiencia} anos de experiência</p>
+                </div>
+            `).join('');
+        }
+
+        function renderizarServicosHome() {
+            const container = document.getElementById('servicos-list');
+            container.innerHTML = servicos.map(s => `
+                <div class="card bg-primary p-6 border-l-4 border-secondary">
+                    <h3 class="text-xl font-bold text-secondary mb-2">${s.nome}</h3>
+                    <p class="text-secondary mb-2">R$ ${s.preco.toFixed(2)}</p>
+                    <p class="text-secondary text-sm">${s.duracao_min} minutos</p>
+                </div>
+            `).join('');
+        }
+
+        function preencherSelects() {
+            const selectServico = document.getElementById('servico_select');
+            selectServico.innerHTML = '<option value="">Escolha um serviço</option>' + 
+                servicos.map(s => `<option value="${s.id}">${s.nome} - R$ ${s.preco.toFixed(2)}</option>`).join('');
+
+            const selectBarbeiro = document.getElementById('barbeiro_select');
+            selectBarbeiro.innerHTML = '<option value="">Escolha um barbeiro</option>' + 
+                barbeiros.map(b => `<option value="${b.id}">${b.nome} (${b.especialidade})</option>`).join('');
+        }
+
+        async function agendar() {
+            const nome = document.getElementById('cliente_nome').value.trim();
+            const telefone = document.getElementById('cliente_telefone').value.trim();
+            const servico_id = document.getElementById('servico_select').value;
+            const barbeiro_id = document.getElementById('barbeiro_select').value;
+            const data_hora = document.getElementById('data_hora').value;
+
+            if (!nome || !telefone || !servico_id || !barbeiro_id || !data_hora) {
+                alert('Por favor, preencha todos os campos');
+                return;
+            }
+
+            const dataHoraObj = new Date(data_hora);
+            const diaSemana = dataHoraObj.getDay();
+            const hora = dataHoraObj.getHours();
+
+            if (diaSemana === 0 || diaSemana === 1) {
+                alert('Estamos abertos apenas de Terça a Sábado');
+                return;
+            }
+
+            if (hora < 9 || hora >= 19) {
+                alert('Horário de funcionamento: 9h às 19h');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/agendamentos`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        barbeiro_id: parseInt(barbeiro_id),
+                        servico_id: parseInt(servico_id),
+                        cliente_nome: nome,
+                        cliente_telefone: telefone,
+                        data_hora: new Date(data_hora).toISOString()
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Erro ao agendar');
+                }
+
+                const agendamento = await response.json();
+
+                const barbeiro = barbeiros.find(b => b.id == barbeiro_id);
+                const servico = servicos.find(s => s.id == servico_id);
+
+                const detalhes = document.getElementById('confirmacao-detalhes');
+                detalhes.innerHTML = `
+                    <p><strong>Nome:</strong> ${nome}</p>
+                    <p><strong>Telefone:</strong> ${telefone}</p>
+                    <p><strong>Barbeiro:</strong> ${barbeiro.nome}</p>
+                    <p><strong>Serviço:</strong> ${servico.nome}</p>
+                    <p><strong>Preço:</strong> R$ ${servico.preco.toFixed(2)}</p>
+                    <p><strong>Data e Hora:</strong> ${new Date(agendamento.data_hora).toLocaleString('pt-BR')}</p>
+                `;
+
+                document.getElementById('cliente_nome').value = '';
+                document.getElementById('cliente_telefone').value = '';
+                document.getElementById('servico_select').value = '';
+                document.getElementById('barbeiro_select').value = '';
+                document.getElementById('data_hora').value = '';
+
+                navigateTo('confirmacao');
+            } catch (err) {
+                console.error('Erro:', err);
+                alert('Erro ao agendar. Tente novamente.');
+            }
+        }
+
+        async function consultarAgendamentos() {
+            const telefone = document.getElementById('telefone_consulta').value.trim();
+
+            if (!telefone) {
+                alert('Digite um telefone');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/agendamentos?telefone=${encodeURIComponent(telefone)}`);
+                agendamentosAtual = await response.json();
+
+                const container = document.getElementById('agendamentos-list');
+                if (agendamentosAtual.length === 0) {
+                    container.innerHTML = '<p class="text-gray-700">Nenhum agendamento encontrado</p>';
+                    return;
+                }
+
+                container.innerHTML = agendamentosAtual.map(ag => {
+                    const barbeiro = barbeiros.find(b => b.id == ag.barbeiro_id);
+                    const servico = servicos.find(s => s.id == ag.servico_id);
+                    return `
+                        <div class="card bg-white p-6">
+                            <div class="flex justify-between items-start mb-4">
+                                <div>
+                                    <h3 class="text-xl font-bold text-primary">${barbeiro?.nome || 'Desconhecido'}</h3>
+                                    <p class="text-gray-700">${servico?.nome || 'Desconhecido'}</p>
+                                    <p class="text-secondary font-semibold">R$ ${servico?.preco.toFixed(2) || '0'}</p>
+                                </div>
+                                <span class="bg-secondary text-primary px-3 py-1 rounded-full text-sm font-semibold">${ag.status}</span>
+                            </div>
+                            <p class="text-gray-600 mb-4">📅 ${new Date(ag.data_hora).toLocaleString('pt-BR')}</p>
+                            <button onclick="cancelarAgendamento(${ag.id})" class="btn btn-primary px-4 py-2 font-semibold text-secondary text-sm">Cancelar</button>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Erro:', err);
+                alert('Erro ao consultar agendamentos');
+            }
+        }
+
+        async function cancelarAgendamento(id) {
+            if (!confirm('Tem certeza que deseja cancelar este agendamento?')) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/agendamentos/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const erro = await response.json();
+                    alert(erro.detail || 'Erro ao cancelar agendamento');
+                    return;
+                }
+
+                const telefone = document.getElementById('telefone_consulta').value;
+                consultarAgendamentos();
+            } catch (err) {
+                console.error('Erro:', err);
+                alert('Erro ao cancelar agendamento');
+            }
+        }
+
+        function navigateTo(page) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+            document.getElementById(page).classList.remove('hidden');
+            window.scrollTo(0, 0);
+        }
+
+        carregarDados();
+    </script>
+</body>
+</html>
+```
+
+```
+=== FILE: schema.sql ===
+
+CREATE TABLE barbeiros (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    experiencia INTEGER NOT NULL,
+    especialidade TEXT NOT NULL
+);
+
+CREATE TABLE servicos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    preco REAL NOT NULL,
+    duracao_min INTEGER NOT NULL
+);
+
+CREATE TABLE agendamentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    barbeiro_id INTEGER NOT NULL,
+    servico_id INTEGER NOT NULL,
+    cliente_nome TEXT NOT NULL,
+    cliente_telefone TEXT NOT NULL,
+    data_hora TEXT NOT NULL,
+    status TEXT NOT NULL,
+    FOREIGN KEY (barbeiro_id) REFERENCES barbeiros(id),
+    FOREIGN KEY (servico_id) REFERENCES servicos(id)
+);
+```
