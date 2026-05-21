@@ -14,7 +14,7 @@ class Config:
     upstream_base_url: str
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         return cls(
             port=int(os.environ.get("SPILLOVER_PORT", "8787")),
             watermark=float(os.environ.get("SPILLOVER_WATERMARK", "0.85")),

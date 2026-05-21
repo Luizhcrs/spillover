@@ -1,5 +1,5 @@
-import os
 from spillover.config import Config
+
 
 def test_config_defaults(monkeypatch):
     monkeypatch.delenv("SPILLOVER_PORT", raising=False)
