@@ -18,13 +18,15 @@ def test_stats_empty_project(tmp_path, monkeypatch):
 
 def test_stats_with_episodes(tmp_path, monkeypatch):
     monkeypatch.setenv("SPILLOVER_DB_ROOT", str(tmp_path))
-    db = open_project_db(tmp_path, "p1")
+    # Use a hex id so _resolve_pid passes it through unchanged
+    pid = "abcdef123456"
+    db = open_project_db(tmp_path, pid)
     try:
         for i in range(3):
             archive_raw(
                 db,
                 Turn(
-                    project_id="p1",
+                    project_id=pid,
                     role="user",
                     content=f"msg {i}",
                     tool_calls=[],
@@ -38,7 +40,7 @@ def test_stats_with_episodes(tmp_path, monkeypatch):
         db.close()
 
     runner = CliRunner()
-    result = runner.invoke(main, ["stats", "p1"])
+    result = runner.invoke(main, ["stats", pid])
     assert result.exit_code == 0
     assert "episodes: 3" in result.output
     assert "evicted: 3" in result.output
@@ -90,12 +92,14 @@ def test_stats_reports_embedded_and_pending(tmp_path, monkeypatch):
     import struct
 
     monkeypatch.setenv("SPILLOVER_DB_ROOT", str(tmp_path))
-    db = open_project_db(tmp_path, "p1")
+    # Use a hex id so _resolve_pid passes it through unchanged
+    pid = "abcdef123456"
+    db = open_project_db(tmp_path, pid)
     try:
         eid = archive_raw(
             db,
             Turn(
-                project_id="p1",
+                project_id=pid,
                 role="user",
                 content="x",
                 tool_calls=[],
@@ -115,6 +119,6 @@ def test_stats_reports_embedded_and_pending(tmp_path, monkeypatch):
         db.close()
 
     runner = CliRunner()
-    result = runner.invoke(main, ["stats", "p1"])
+    result = runner.invoke(main, ["stats", pid])
     assert "embedded: 1" in result.output
     assert "facet_pending: 0" in result.output

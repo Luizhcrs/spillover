@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
 
 import click
@@ -8,6 +10,15 @@ import uvicorn
 from spillover.config import Config
 from spillover.proxy.app import create_app
 from spillover.storage.sqlite import open_project_db, project_db_path
+
+_HEX_ID = re.compile(r"^[0-9a-f]{6,64}$")
+
+
+def _resolve_pid(raw: str) -> str:
+    """Mirror ProjectIdMiddleware: pass hex IDs through; sha1-hash everything else."""
+    if _HEX_ID.match(raw):
+        return raw
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 @click.group()
@@ -31,6 +42,7 @@ def up(port: int | None, host: str):
 @click.argument("project_id")
 def stats(project_id: str):
     """Show episode statistics for a project."""
+    project_id = _resolve_pid(project_id)
     config = Config.from_env()
     path = project_db_path(config.db_root, project_id)
     if not path.exists():
@@ -64,6 +76,7 @@ def stats(project_id: str):
 @click.option("--topk", default=None, type=int)
 def query(project_id: str, text: str, topk: int | None):
     """Run the hybrid retriever ad-hoc against a project and print ranked hits."""
+    project_id = _resolve_pid(project_id)
     from spillover.facet.embed import embed_text
     from spillover.facet.entities import extract_entities
     from spillover.retriever.fusion import rrf_fuse
