@@ -37,3 +37,24 @@ class Adapter(ABC):
     @abstractmethod
     def build(self, conversation: Conversation) -> dict:
         ...
+
+    @abstractmethod
+    def extract_usage_non_streaming(self, body: bytes) -> tuple[int, int] | None:
+        ...
+
+    @abstractmethod
+    def extract_usage_sse(self, captured: list[bytes]) -> tuple[int, int] | None:
+        ...
+
+    @abstractmethod
+    def parse_response_text(self, resp_json: dict) -> str:
+        ...
+
+    @abstractmethod
+    def extract_assistant_text_sse(self, captured: list[bytes]) -> str:
+        ...
+
+    @abstractmethod
+    def inject_ltm(self, payload: dict, ltm_text: str) -> None:
+        """Mutate payload in place to insert the LTM block at the right place."""
+        ...

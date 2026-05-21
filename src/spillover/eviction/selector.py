@@ -11,6 +11,7 @@ class ActiveTurn:
     pinned: bool = False
     memory_type: str | None = None
     is_system: bool = False
+    density: int = 0  # entities + decisions + tool_calls; higher = more valuable
 
 
 @dataclass
@@ -21,11 +22,27 @@ class SelectionResult:
     budget_pressure: bool = False
 
 
+def _weight(t: ActiveTurn) -> float:
+    return t.token_count / max(1, t.density)
+
+
+def _ordered_candidates(cands: list[ActiveTurn]) -> list[ActiveTurn]:
+    """Sort candidates for eviction.
+
+    If any candidate has density > 0, use weighted sort: higher weight (low
+    density, high token_count) evicted first. Tiebreak by index ascending.
+    When all densities are 0, preserve original (FIFO) order.
+    """
+    if any(t.density > 0 for t in cands):
+        return sorted(cands, key=lambda t: (-_weight(t), t.index))
+    return cands  # preserve original FIFO order
+
+
 def _evictable_pass1(turns: list[ActiveTurn], recent_buffer: int) -> list[ActiveTurn]:
     if not turns:
         return []
     cutoff = max(0, len(turns) - recent_buffer)
-    return [
+    cands = [
         t
         for i, t in enumerate(turns)
         if not t.is_system
@@ -33,6 +50,7 @@ def _evictable_pass1(turns: list[ActiveTurn], recent_buffer: int) -> list[Active
         and t.memory_type != "priority"
         and i < cutoff
     ]
+    return _ordered_candidates(cands)
 
 
 def _evictable_pass2(turns: list[ActiveTurn], recent_buffer: int) -> list[ActiveTurn]:
@@ -44,10 +62,10 @@ def _evictable_pass2(turns: list[ActiveTurn], recent_buffer: int) -> list[Active
         for i, t in enumerate(turns)
         if not t.is_system and not t.pinned and i < cutoff
     ]
-    # Non-priority first (FIFO), then priority (FIFO) — mirrors pass 1 preference
+    # Non-priority first, then priority -- mirrors pass 1 preference
     non_priority = [t for _, t in candidates if t.memory_type != "priority"]
     priority = [t for _, t in candidates if t.memory_type == "priority"]
-    return non_priority + priority
+    return _ordered_candidates(non_priority) + _ordered_candidates(priority)
 
 
 def select_for_eviction(
@@ -59,6 +77,7 @@ def select_for_eviction(
 
     Implements the 3-pass policy from spec §5:
       - Pass 1: FIFO over non-priority, non-pinned, non-system, non-recent turns.
+        When any turn has density>0, uses weighted sort instead of FIFO.
       - Pass 2 (fallback if Pass 1 short): drain remaining non-priority first,
         then priority turns oldest-first. Still excludes system, pinned, recent.
       - Pass 3 (fallback if Pass 2 short): return whatever Pass 2 freed and

@@ -51,3 +51,10 @@ compaction_detected_total = Counter(
     labelnames=("project",),
     registry=REGISTRY,
 )
+
+facet_dropped_total = Counter(
+    "spillover_facet_dropped_total",
+    "Facet events dropped due to queue backpressure",
+    labelnames=("project",),
+    registry=REGISTRY,
+)
