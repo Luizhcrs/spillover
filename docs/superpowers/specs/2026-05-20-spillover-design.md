@@ -93,7 +93,12 @@ This is **persistent cognition**, not a chatbot with a bigger window.
    - Reciprocal Rank Fusion (RRF) with type weights (procedural >= episodic >= semantic)
    - filtered to LTM token budget
 
-5. **overflow trigger** — post-response: measures `total_tokens / window_max`. Past watermark (default 0.85), selects oldest turns (FIFO after system + recent buffer + pinned) until back to 0.70. Packages and pushes to indexer queue.
+5. **overflow trigger** — post-response, token-balanced steady-state policy:
+   - **Fill phase** (`fill_ratio < watermark`): no overflow. Window fills naturally.
+   - **Steady phase** (`fill_ratio >= watermark`, default 0.85): each request evicts `tokens_in_this_turn` oldest tokens, where `tokens_in_this_turn = new_user_tokens + new_assistant_tokens`. N in = N out. Window stays glued to the ceiling.
+   - Eviction order: FIFO over evictable turns. Excluded: system, last 4 turns (recent buffer), pinned turns, `priority`-type turns.
+   - Eviction is **turn-granular**, not token-granular: spillover evicts whole turns whose cumulative token count meets or exceeds the required N. Never splits a turn mid-content.
+   - Packages and pushes evicted turns to indexer queue.
 
 6. **archiver** — writes raw turn to SQLite (`episodes` table), returns `episode_id` synchronously to guarantee durability before async pipeline begins.
 
@@ -130,7 +135,7 @@ LTM injection delivered as additional system message OR system block (adapter de
 | Response reservation | 10% |
 | System + tools | 5% |
 
-Overflow watermark default: trigger at 0.85, evict down to 0.70.
+Overflow policy: watermark 0.85 triggers steady-state. Once steady, each turn evicts `tokens_in_this_turn` oldest tokens (1:1 balance). Window remains at ~ceiling indefinitely. Drop-to-low-mark behavior intentionally removed — would waste context capacity.
 
 ## 5. Counter-compaction defenses
 
@@ -172,8 +177,13 @@ If the CLI compacts anyway, spillover detects via conversation diff. Proxy store
 ### 6.2 Cold path (overflow async)
 
 1. Worker consumes `AssistantTurnComplete`.
-2. Compute `fill_ratio = real_usage.input_tokens / window_max`. If < 0.85: persist turn as active-record, skip overflow.
-3. If >= 0.85: `select_for_eviction(target_ratio=0.70)`. Excludes system, last 4 turns (recent buffer), pinned. FIFO over the rest until back to 0.70.
+2. Compute `fill_ratio = real_usage.input_tokens / window_max`. If < 0.85 (fill phase): persist turn as active-record, skip overflow.
+3. If >= 0.85 (steady phase): `select_for_eviction(tokens_to_free = new_user_tokens + new_assistant_tokens)`.
+   - Pass 1: FIFO over evictable turns. Excludes system, last 4 turns (recent buffer), pinned, `priority`-type. Accumulate until summed tokens >= `tokens_to_free`.
+   - Pass 2 (fallback if Pass 1 short): include `priority`-type turns oldest-first, accumulate until tokens_to_free met. Logs `priority_evicted` event.
+   - Pass 3 (still short, edge case): shrink LTM injection budget temporarily, log `budget_pressure` event, alert user.
+   - Token counts per turn use the provider's official tokenizer (anthropic SDK / tiktoken) memoized per turn hash.
+   - 1:1 balance keeps window pinned to ceiling indefinitely.
 4. For each eviction candidate: `archive_raw` (INSERT into `episodes` table). Durability before marking removable.
 5. Mark episodes `evicted` — next retriever query excludes them from active set.
 6. Emit `FacetExtractEvent(episode_id)` to facet queue.
@@ -321,7 +331,8 @@ Three tiers:
 
 - adapter parse/build per provider with real wire-format fixtures
 - retriever fusion: top-K vector + graph in → expected ordering out
-- eviction selector: window state in → candidate list out
+- eviction selector: window state + tokens_to_free in → candidate list out, with all 3 passes covered (FIFO non-priority, priority fallback, budget pressure)
+- token balance invariant: simulate 50 turns of varying size, assert `len(active_tokens_after) - len(active_tokens_before) == new_tokens - evicted_tokens` (1:1 conservation)
 - facet parsers: regex decisions / code_refs / entities match fixtures
 - decay function: score + age in → expected score out
 - counter-compact usage rewrite: real usage in → visible usage out
