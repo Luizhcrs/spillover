@@ -7,15 +7,19 @@ from spillover.retriever.vector import Hit
 
 
 def render_ltm_block(db: sqlite3.Connection, hits: list[Hit]) -> str:
-    """Render hits as a single <spillover-ltm> block."""
     if not hits:
         return ""
+    ids = [h.episode_id for h in hits]
+    placeholders = ",".join("?" for _ in ids)
+    rows = db.execute(
+        f"SELECT id, role, content_json, memory_type FROM episodes "
+        f"WHERE id IN ({placeholders})",
+        ids,
+    ).fetchall()
+    by_id = {r["id"]: r for r in rows}
     sections: list[str] = []
     for hit in hits:
-        row = db.execute(
-            "SELECT role, content_json, memory_type FROM episodes WHERE id = ?",
-            (hit.episode_id,),
-        ).fetchone()
+        row = by_id.get(hit.episode_id)
         if row is None:
             continue
         content = json.loads(row["content_json"])
@@ -29,6 +33,8 @@ def render_ltm_block(db: sqlite3.Connection, hits: list[Hit]) -> str:
             f'<episode id="{hit.episode_id}" type="{row["memory_type"]}" '
             f'role="{row["role"]}">\n{text}\n</episode>'
         )
+    if not sections:
+        return ""
     return (
         "<spillover-ltm>\n"
         "The following are relevant past episodes retrieved from long-term memory.\n"

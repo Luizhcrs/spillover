@@ -22,6 +22,7 @@ from spillover.facet.entities import extract_entities
 from spillover.facet.worker import FacetEvent, FacetWorker
 from spillover.logging import configure_root_logger, get_logger
 from spillover.proxy.middleware import ProjectIdMiddleware
+from spillover.proxy.retry import with_retry
 from spillover.retriever.budget import trim_to_budget
 from spillover.retriever.fusion import rrf_fuse
 from spillover.retriever.graph import graph_walk
@@ -450,9 +451,12 @@ def create_app(config: Config) -> FastAPI:
 
         if not is_stream:
             with request_duration.labels(phase="upstream").time():
-                r = await app.state.http_client.post(
-                    upstream_url, headers=fwd_headers, content=forwarded_body
-                )
+                async def _post():
+                    return await app.state.http_client.post(
+                        upstream_url, headers=fwd_headers, content=forwarded_body
+                    )
+
+                r = await with_retry(_post)
             resp_bytes = r.content
             archived_ids: list[str] = []
             tokens_archived = 0
