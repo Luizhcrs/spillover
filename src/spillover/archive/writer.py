@@ -38,23 +38,31 @@ def archive_raw(db: sqlite3.Connection, turn: Turn) -> str:
     if existing is not None:
         return existing["id"]
     eid = str(uuid.uuid4())
-    db.execute(
-        """
-        INSERT INTO episodes (
-            id, project_id, role, content_json, tool_calls_json,
-            code_refs_json, token_count, ts, hash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            eid,
-            turn.project_id,
-            turn.role,
-            json.dumps(turn.content, ensure_ascii=False),
-            json.dumps(turn.tool_calls, ensure_ascii=False),
-            json.dumps(turn.code_refs, ensure_ascii=False),
-            turn.token_count,
-            turn.ts,
-            h,
-        ),
-    )
-    return eid
+    try:
+        db.execute(
+            """
+            INSERT INTO episodes (
+                id, project_id, role, content_json, tool_calls_json,
+                code_refs_json, token_count, ts, hash
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                eid,
+                turn.project_id,
+                turn.role,
+                json.dumps(turn.content, ensure_ascii=False),
+                json.dumps(turn.tool_calls, ensure_ascii=False),
+                json.dumps(turn.code_refs, ensure_ascii=False),
+                turn.token_count,
+                turn.ts,
+                h,
+            ),
+        )
+        return eid
+    except sqlite3.IntegrityError:
+        existing = db.execute(
+            "SELECT id FROM episodes WHERE hash = ?", (h,)
+        ).fetchone()
+        if existing is None:
+            raise
+        return existing["id"]

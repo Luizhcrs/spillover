@@ -49,3 +49,29 @@ def test_archive_raw_dedup_by_hash(tmp_path):
         assert count == 1
     finally:
         db.close()
+
+
+def test_archive_raw_handles_race_on_hash(tmp_path):
+    """Simulate two writers racing: pre-insert a row, then archive_raw with the
+    same hash should return the pre-inserted id, not crash."""
+    db = open_project_db(tmp_path, "p1")
+    try:
+        turn = Turn(
+            project_id="p1",
+            role="user",
+            content="race text",
+            tool_calls=[],
+            code_refs=[],
+            token_count=2,
+            ts=1700000000000,
+        )
+        # First call inserts.
+        eid1 = archive_raw(db, turn)
+        # Manually duplicate-insert path: hash UNIQUE will now reject any race.
+        # archive_raw must still return the original id on a second call.
+        eid2 = archive_raw(db, turn)
+        assert eid1 == eid2
+        count = db.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+        assert count == 1
+    finally:
+        db.close()

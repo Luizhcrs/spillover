@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS episodes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_episodes_evicted_ts ON episodes(evicted, ts);
-CREATE INDEX IF NOT EXISTS idx_episodes_hash ON episodes(hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_episodes_hash ON episodes(hash);
 
 -- project_id retained in PK even though DB is per-project: keeps schema portable
 -- if we ever consolidate multi-project storage in a future version.
