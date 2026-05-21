@@ -597,4 +597,16 @@ def create_app(config: Config) -> FastAPI:
             media_type=CONTENT_TYPE_LATEST,
         )
 
+    @app.get("/health")
+    async def health():
+        return {"status": "ok", "version": "1.2.0"}
+
+    @app.get("/")
+    async def root():
+        return {
+            "name": "spillover",
+            "version": "1.2.0",
+            "endpoints": ["/v1/messages", "/v1/chat/completions", "/metrics", "/health"],
+        }
+
     return app
