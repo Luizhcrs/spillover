@@ -96,7 +96,16 @@ def _stream_rewrite_enabled(config: Config) -> bool:
     return os.environ.get("SPILLOVER_STREAM_REWRITE", "1") != "0"
 
 
-def _retrieve_ltm_block(config: Config, project_id: str, conv: Conversation) -> str:
+def _ltm_budget_for(config: Config, payload: dict) -> int:
+    from spillover.budget.profile import select_profile
+
+    profile = select_profile(payload, config.profile_default)
+    return int(config.operational_ceiling_tokens * profile.ltm_pct)
+
+
+def _retrieve_ltm_block(
+    config: Config, project_id: str, conv: Conversation, inbound_payload: dict | None = None
+) -> str:
     """Run hybrid retrieval and return the <spillover-ltm> string (or empty)."""
     if not conv.turns:
         return ""
@@ -134,11 +143,13 @@ def _retrieve_ltm_block(config: Config, project_id: str, conv: Conversation) -> 
                     kuzu_conn, seeds, k_hop=2, limit=config.retriever_graph_k
                 )
             except Exception:
-                log = get_logger("retriever")
-                log.exception("graph walk failed project=%s", project_id)
+                _log.exception("graph walk failed project=%s", project_id)
 
         fused = rrf_fuse(v_hits, g_hits)[: config.retriever_topk]
-        budget = int(config.window_max * config.ltm_budget_pct)
+        if inbound_payload is not None:
+            budget = _ltm_budget_for(config, inbound_payload)
+        else:
+            budget = int(config.window_max * config.ltm_budget_pct)
         trimmed = trim_to_budget(db, fused, max_tokens=budget)
         return render_ltm_block(db, trimmed)
     finally:
@@ -400,7 +411,7 @@ def create_app(config: Config) -> FastAPI:
             conv = adapter.parse(payload)
             with request_duration.labels(phase="retrieve").time():
                 ltm_text = await _run_sync(
-                    loop, _retrieve_ltm_block, config, project_id, conv
+                    loop, _retrieve_ltm_block, config, project_id, conv, payload
                 )
             if ltm_text:
                 retriever_hits_total.labels(
