@@ -1,0 +1,740 @@
+=== FILE: backend.py ===
+```python
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from pydantic import BaseModel
+from datetime import datetime, timedelta
+import sqlite3
+import json
+import logging
+
+# Logging config
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Database setup
+DATABASE_URL = "sqlite:///./barbershop.db"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Models
+class Barbeiro(Base):
+    __tablename__ = "barbeiros"
+    id = Column(Integer, primary_key=True)
+    nome = Column(String, unique=True, index=True)
+    telefone = Column(String)
+
+class Servico(Base):
+    __tablename__ = "servicos"
+    id = Column(Integer, primary_key=True)
+    nome = Column(String, unique=True, index=True)
+    preco = Column(Float)
+    duracao_minutos = Column(Integer)
+
+class Agendamento(Base):
+    __tablename__ = "agendamentos"
+    id = Column(Integer, primary_key=True)
+    cliente_nome = Column(String)
+    cliente_telefone = Column(String)
+    barbeiro_id = Column(Integer)
+    servico_id = Column(Integer)
+    data_hora = Column(DateTime)
+    confirmado = Column(Boolean, default=False)
+    criado_em = Column(DateTime, default=datetime.utcnow)
+
+# Schemas
+class BarbeiroSchema(BaseModel):
+    id: int
+    nome: str
+    telefone: str
+
+    class Config:
+        from_attributes = True
+
+class ServicoSchema(BaseModel):
+    id: int
+    nome: str
+    preco: float
+    duracao_minutos: int
+
+    class Config:
+        from_attributes = True
+
+class AgendamentoCreate(BaseModel):
+    cliente_nome: str
+    cliente_telefone: str
+    barbeiro_id: int
+    servico_id: int
+    data_hora: datetime
+
+class AgendamentoSchema(BaseModel):
+    id: int
+    cliente_nome: str
+    cliente_telefone: str
+    barbeiro_id: int
+    servico_id: int
+    data_hora: datetime
+    confirmado: bool
+    criado_em: datetime
+
+    class Config:
+        from_attributes = True
+
+class ConfirmacaoRequest(BaseModel):
+    telefone: str
+
+# FastAPI app
+app = FastAPI(title="BarberShop API", version="1.0")
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Init DB
+def init_db():
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    
+    # Seed barbeiros
+    if db.query(Barbeiro).count() == 0:
+        barbeiros = [
+            Barbeiro(nome="Carlos Silva", telefone="11987654321"),
+            Barbeiro(nome="João Santos", telefone="11987654322"),
+            Barbeiro(nome="Ricardo Oliveira", telefone="11987654323"),
+        ]
+        db.add_all(barbeiros)
+        db.commit()
+    
+    # Seed servicos
+    if db.query(Servico).count() == 0:
+        servicos = [
+            Servico(nome="Corte Simples", preco=40.00, duracao_minutos=30),
+            Servico(nome="Corte com Barba", preco=60.00, duracao_minutos=45),
+            Servico(nome="Barba Completa", preco=35.00, duracao_minutos=30),
+            Servico(nome="Hidratação Capilar", preco=50.00, duracao_minutos=40),
+            Servico(nome="Pigmentação", preco=70.00, duracao_minutos=50),
+        ]
+        db.add_all(servicos)
+        db.commit()
+    
+    db.close()
+
+init_db()
+
+# Routes
+@app.get("/")
+async def root():
+    return FileResponse("frontend.html")
+
+@app.get("/api/v1/barbeiros", response_model=list[BarbeiroSchema])
+async def get_barbeiros(db: Session = Depends(get_db)):
+    return db.query(Barbeiro).all()
+
+@app.get("/api/v1/servicos", response_model=list[ServicoSchema])
+async def get_servicos(db: Session = Depends(get_db)):
+    return db.query(Servico).all()
+
+@app.post("/api/v1/agendamentos", response_model=AgendamentoSchema)
+async def criar_agendamento(agendamento: AgendamentoCreate, db: Session = Depends(get_db)):
+    # Validações
+    if not db.query(Barbeiro).filter(Barbeiro.id == agendamento.barbeiro_id).first():
+        raise HTTPException(status_code=404, detail="Barbeiro não encontrado")
+    
+    if not db.query(Servico).filter(Servico.id == agendamento.servico_id).first():
+        raise HTTPException(status_code=404, detail="Serviço não encontrado")
+    
+    if agendamento.data_hora < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Data/hora não pode ser no passado")
+    
+    # Conflito de horário
+    conflito = db.query(Agendamento).filter(
+        Agendamento.barbeiro_id == agendamento.barbeiro_id,
+        Agendamento.data_hora == agendamento.data_hora,
+        Agendamento.confirmado == True
+    ).first()
+    
+    if conflito:
+        raise HTTPException(status_code=409, detail="Horário indisponível")
+    
+    novo_agendamento = Agendamento(
+        cliente_nome=agendamento.cliente_nome,
+        cliente_telefone=agendamento.cliente_telefone,
+        barbeiro_id=agendamento.barbeiro_id,
+        servico_id=agendamento.servico_id,
+        data_hora=agendamento.data_hora,
+        confirmado=False
+    )
+    
+    db.add(novo_agendamento)
+    db.commit()
+    db.refresh(novo_agendamento)
+    
+    return novo_agendamento
+
+@app.post("/api/v1/agendamentos/{id}/confirmar")
+async def confirmar_agendamento(id: int, confirmacao: ConfirmacaoRequest, db: Session = Depends(get_db)):
+    agendamento = db.query(Agendamento).filter(Agendamento.id == id).first()
+    
+    if not agendamento:
+        raise HTTPException(status_code=404, detail="Agendamento não encontrado")
+    
+    if agendamento.cliente_telefone != confirmacao.telefone:
+        raise HTTPException(status_code=403, detail="Telefone não coincide")
+    
+    agendamento.confirmado = True
+    db.commit()
+    
+    # Simular envio WhatsApp
+    servico = db.query(Servico).filter(Servico.id == agendamento.servico_id).first()
+    barbeiro = db.query(Barbeiro).filter(Barbeiro.id == agendamento.barbeiro_id).first()
+    
+    mensagem = f"""
+    [WhatsApp Simulado]
+    Olá {agendamento.cliente_nome}!
+    
+    Seu agendamento foi confirmado:
+    📅 Data/Hora: {agendamento.data_hora.strftime('%d/%m/%Y %H:%M')}
+    💈 Serviço: {servico.nome}
+    💰 Valor: R$ {servico.preco:.2f}
+    👨 Barbeiro: {barbeiro.nome}
+    
+    Endereço: Rua das Flores, 123 - Centro, São Paulo, SP
+    📞 Telefone: (11) 3333-4444
+    
+    Até logo!
+    """
+    
+    logger.info(mensagem)
+    
+    return {"status": "confirmado", "id": id}
+
+@app.get("/api/v1/agendamentos")
+async def listar_agendamentos(telefone: str, db: Session = Depends(get_db)):
+    agendamentos = db.query(Agendamento).filter(
+        Agendamento.cliente_telefone == telefone
+    ).all()
+    
+    resultado = []
+    for agendamento in agendamentos:
+        servico = db.query(Servico).filter(Servico.id == agendamento.servico_id).first()
+        barbeiro = db.query(Barbeiro).filter(Barbeiro.id == agendamento.barbeiro_id).first()
+        
+        resultado.append({
+            "id": agendamento.id,
+            "cliente_nome": agendamento.cliente_nome,
+            "cliente_telefone": agendamento.cliente_telefone,
+            "barbeiro": barbeiro.nome if barbeiro else "",
+            "servico": servico.nome if servico else "",
+            "preco": servico.preco if servico else 0,
+            "data_hora": agendamento.data_hora.isoformat(),
+            "confirmado": agendamento.confirmado
+        })
+    
+    return resultado
+
+@app.get("/api/v1/disponibilidade")
+async def get_disponibilidade(barbeiro_id: int, data: str, db: Session = Depends(get_db)):
+    from datetime import time
+    
+    horarios_disponiveis = []
+    horarios_sistema = [
+        "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+        "12:00", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00"
+    ]
+    
+    for horario in horarios_sistema:
+        data_hora = datetime.strptime(f"{data} {horario}", "%Y-%m-%d %H:%M")
+        
+        conflito = db.query(Agendamento).filter(
+            Agendamento.barbeiro_id == barbeiro_id,
+            Agendamento.data_hora == data_hora,
+            Agendamento.confirmado == True
+        ).first()
+        
+        if not conflito and data_hora > datetime.utcnow():
+            horarios_disponiveis.append(horario)
+    
+    return {"horarios": horarios_disponiveis}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+=== FILE: frontend.html ===
+```html
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BarberShop - Sistema de Agendamentos</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Roboto', sans-serif;
+        }
+        .heading {
+            font-family: 'Playfair Display', serif;
+        }
+        .bg-primary {
+            background-color: #1a1a1a;
+        }
+        .bg-accent {
+            background-color: #d4af37;
+        }
+        .text-accent {
+            color: #d4af37;
+        }
+        .border-accent {
+            border-color: #d4af37;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-primary text-white sticky top-0 z-50 shadow-lg">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="heading text-2xl text-accent">BarberShop</div>
+            <div class="flex gap-6">
+                <a href="#home" class="hover:text-accent transition">Home</a>
+                <a href="#agendar" class="hover:text-accent transition">Agendar</a>
+                <a href="#meus-agendamentos" class="hover:text-accent transition">Meus Agendamentos</a>
+                <a href="#sobre" class="hover:text-accent transition">Sobre</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Home -->
+    <div id="home" class="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white flex flex-col justify-center">
+        <div class="max-w-6xl mx-auto px-4 text-center">
+            <h1 class="heading text-6xl mb-4 text-accent">BarberShop Premium</h1>
+            <p class="text-xl mb-8 text-gray-300">O melhor atendimento barbershop de São Paulo</p>
+            <button onclick="navigate('#agendar')" class="bg-accent text-primary px-8 py-3 text-lg font-bold rounded hover:bg-yellow-500 transition">
+                Agendar Agora
+            </button>
+            <div class="mt-16 grid grid-cols-3 gap-8">
+                <div class="text-center">
+                    <div class="text-4xl text-accent mb-2">👨</div>
+                    <h3 class="heading text-xl mb-2">Profissionais</h3>
+                    <p class="text-gray-400">Barbeiros experientes e dedicados</p>
+                </div>
+                <div class="text-center">
+                    <div class="text-4xl text-accent mb-2">⏱️</div>
+                    <h3 class="heading text-xl mb-2">Rápido</h3>
+                    <p class="text-gray-400">Agendamentos e atendimento ágil</p>
+                </div>
+                <div class="text-center">
+                    <div class="text-4xl text-accent mb-2">💎</div>
+                    <h3 class="heading text-xl mb-2">Premium</h3>
+                    <p class="text-gray-400">Serviços de alta qualidade</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agendar -->
+    <div id="agendar" class="min-h-screen bg-gray-100 py-12">
+        <div class="max-w-2xl mx-auto px-4">
+            <h2 class="heading text-4xl text-center mb-12 text-primary">Agendar Serviço</h2>
+            <div class="bg-white rounded-lg shadow-lg p-8">
+                <form id="agendamentoForm" class="space-y-6">
+                    <!-- Nome -->
+                    <div>
+                        <label class="block text-sm font-bold text-primary mb-2">Nome Completo</label>
+                        <input type="text" id="cliente_nome" placeholder="João Silva" class="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:border-accent" required>
+                    </div>
+
+                    <!-- Telefone -->
+                    <div>
+                        <label class="block text-sm font-bold text-primary mb-2">Telefone (WhatsApp)</label>
+                        <input type="tel" id="cliente_telefone" placeholder="11987654321" class="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:border-accent" required>
+                    </div>
+
+                    <!-- Serviço -->
+                    <div>
+                        <label class="block text-sm font-bold text-primary mb-2">Selecione o Serviço</label>
+                        <select id="servico_id" class="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:border-accent" required onchange="updateServico()">
+                            <option value="">Escolha um serviço...</option>
+                        </select>
+                        <div id="servicoInfo" class="mt-2 text-sm text-gray-600"></div>
+                    </div>
+
+                    <!-- Barbeiro -->
+                    <div>
+                        <label class="block text-sm font-bold text-primary mb-2">Selecione o Barbeiro</label>
+                        <select id="barbeiro_id" class="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:border-accent" required onchange="updateDisponibilidade()">
+                            <option value="">Escolha um barbeiro...</option>
+                        </select>
+                    </div>
+
+                    <!-- Data -->
+                    <div>
+                        <label class="block text-sm font-bold text-primary mb-2">Data</label>
+                        <input type="date" id="data" class="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:border-accent" required onchange="updateDisponibilidade()">
+                    </div>
+
+                    <!-- Horário -->
+                    <div>
+                        <label class="block text-sm font-bold text-primary mb-2">Horário</label>
+                        <select id="horario" class="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:border-accent" required>
+                            <option value="">Escolha um horário...</option>
+                        </select>
+                    </div>
+
+                    <!-- Botão -->
+                    <button type="submit" class="w-full bg-accent text-primary font-bold py-3 rounded hover:bg-yellow-500 transition">
+                        Confirmar Agendamento
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmação -->
+    <div id="confirmacao" class="min-h-screen bg-green-50 py-12 hidden">
+        <div class="max-w-2xl mx-auto px-4">
+            <div class="bg-white rounded-lg shadow-lg p-8 text-center">
+                <div class="text-6xl text-green-500 mb-4">✓</div>
+                <h2 class="heading text-4xl text-primary mb-4">Agendamento Realizado!</h2>
+                <p class="text-gray-600 mb-6">Um link de confirmação foi enviado para seu WhatsApp</p>
+                <div id="confirmacaoDetalhes" class="bg-gray-50 p-6 rounded mb-6 text-left">
+                    <!-- Detalhes do agendamento -->
+                </div>
+                <button onclick="navigate('#home')" class="bg-accent text-primary px-8 py-3 font-bold rounded hover:bg-yellow-500 transition">
+                    Voltar à Home
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Meus Agendamentos -->
+    <div id="meus-agendamentos" class="min-h-screen bg-gray-100 py-12">
+        <div class="max-w-4xl mx-auto px-4">
+            <h2 class="heading text-4xl text-center mb-12 text-primary">Meus Agendamentos</h2>
+            <div class="bg-white rounded-lg shadow-lg p-8 mb-6">
+                <label class="block text-sm font-bold text-primary mb-2">Digite seu telefone para consultar</label>
+                <div class="flex gap-2">
+                    <input type="tel" id="telefone_consulta" placeholder="11987654321" class="flex-1 px-4 py-2 border border-gray-300 rounded focus:outline-none focus:border-accent">
+                    <button onclick="consultarAgendamentos()" class="bg-accent text-primary px-6 py-2 font-bold rounded hover:bg-yellow-500 transition">
+                        Buscar
+                    </button>
+                </div>
+            </div>
+            <div id="agendamentosLista" class="space-y-4"></div>
+        </div>
+    </div>
+
+    <!-- Sobre -->
+    <div id="sobre" class="min-h-screen bg-primary text-white py-12">
+        <div class="max-w-4xl mx-auto px-4">
+            <h2 class="heading text-4xl text-center mb-12 text-accent">Sobre Nós</h2>
+            <div class="grid grid-cols-2 gap-8">
+                <div>
+                    <h3 class="heading text-2xl text-accent mb-4">Quem Somos</h3>
+                    <p class="text-gray-300 mb-4">
+                        A BarberShop é uma barbearia premium localizada no coração de São Paulo, dedicada a oferecer os melhores serviços de corte e barbear.
+                    </p>
+                    <p class="text-gray-300">
+                        Com profissionais experientes e produtos de qualidade, garantimos sua satisfação em cada atendimento.
+                    </p>
+                </div>
+                <div>
+                    <h3 class="heading text-2xl text-accent mb-4">Localização</h3>
+                    <p class="text-gray-300 mb-2">📍 Rua das Flores, 123</p>
+                    <p class="text-gray-300 mb-2">Centro, São Paulo - SP</p>
+                    <p class="text-gray-300 mb-4">CEP: 01310-100</p>
+                    <p class="text-gray-300 mb-2">📞 Telefone: (11) 3333-4444</p>
+                    <p class="text-gray-300">⏰ Seg-Sex: 9h-18h | Sáb: 9h-15h</p>
+                </div>
+            </div>
+            <div class="mt-12 pt-8 border-t border-gray-700 text-center text-gray-400">
+                <p>&copy; 2024 BarberShop. Todos os direitos reservados.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-primary text-white text-center py-4 border-t border-accent">
+        <p>BarberShop © 2024 | Desenvolvido com ❤️</p>
+    </footer>
+
+    <script>
+        const API_BASE = "/api/v1";
+        let agendamentoAtual = null;
+
+        // Navigation
+        function navigate(hash) {
+            window.location.hash = hash;
+            document.querySelectorAll('[id]').forEach(el => {
+                if (el.id.startsWith('home') || el.id.startsWith('agendar') || 
+                    el.id.startsWith('confirmacao') || el.id.startsWith('meus-') || el.id.startsWith('sobre')) {
+                    el.classList.add('hidden');
+                }
+            });
+            const target = document.getElementById(hash.substring(1));
+            if (target) target.classList.remove('hidden');
+        }
+
+        // Load barbeiros
+        async function loadBarbeiros() {
+            try {
+                const res = await fetch(`${API_BASE}/barbeiros`);
+                const barbeiros = await res.json();
+                const select = document.getElementById('barbeiro_id');
+                barbeiros.forEach(b => {
+                    const option = document.createElement('option');
+                    option.value = b.id;
+                    option.textContent = b.nome;
+                    select.appendChild(option);
+                });
+            } catch (e) {
+                console.error('Erro ao carregar barbeiros:', e);
+            }
+        }
+
+        // Load serviços
+        async function loadServicos() {
+            try {
+                const res = await fetch(`${API_BASE}/servicos`);
+                const servicos = await res.json();
+                const select = document.getElementById('servico_id');
+                servicos.forEach(s => {
+                    const option = document.createElement('option');
+                    option.value = s.id;
+                    option.textContent = `${s.nome} - R$ ${s.preco.toFixed(2)}`;
+                    option.dataset.preco = s.preco;
+                    option.dataset.duracao = s.duracao_minutos;
+                    select.appendChild(option);
+                });
+            } catch (e) {
+                console.error('Erro ao carregar serviços:', e);
+            }
+        }
+
+        // Update serviço info
+        function updateServico() {
+            const select = document.getElementById('servico_id');
+            const option = select.options[select.selectedIndex];
+            const info = document.getElementById('servicoInfo');
+            if (option.value) {
+                info.innerHTML = `<strong>Valor:</strong> R$ ${parseFloat(option.dataset.preco).toFixed(2)} | <strong>Duração:</strong> ${option.dataset.duracao}min`;
+            } else {
+                info.innerHTML = '';
+            }
+        }
+
+        // Update disponibilidade
+        async function updateDisponibilidade() {
+            const barbeiroId = document.getElementById('barbeiro_id').value;
+            const data = document.getElementById('data').value;
+            
+            if (!barbeiroId || !data) return;
+
+            try {
+                const res = await fetch(`${API_BASE}/disponibilidade?barbeiro_id=${barbeiroId}&data=${data}`);
+                const resp = await res.json();
+                const select = document.getElementById('horario');
+                select.innerHTML = '<option value="">Escolha um horário...</option>';
+                resp.horarios.forEach(h => {
+                    const option = document.createElement('option');
+                    option.value = h;
+                    option.textContent = h;
+                    select.appendChild(option);
+                });
+            } catch (e) {
+                console.error('Erro ao carregar disponibilidade:', e);
+            }
+        }
+
+        // Form submission
+        document.getElementById('agendamentoForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const dados = {
+                cliente_nome: document.getElementById('cliente_nome').value,
+                cliente_telefone: document.getElementById('cliente_telefone').value,
+                barbeiro_id: parseInt(document.getElementById('barbeiro_id').value),
+                servico_id: parseInt(document.getElementById('servico_id').value),
+                data_hora: `${document.getElementById('data').value}T${document.getElementById('horario').value}:00`
+            };
+
+            try {
+                const res = await fetch(`${API_BASE}/agendamentos`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(dados)
+                });
+                
+                if (res.ok) {
+                    agendamentoAtual = await res.json();
+                    mostrarConfirmacao();
+                } else {
+                    alert('Erro ao criar agendamento');
+                }
+            } catch (e) {
+                alert('Erro: ' + e.message);
+            }
+        });
+
+        // Mostrar confirmação
+        async function mostrarConfirmacao() {
+            document.getElementById('agendar').classList.add('hidden');
+            document.getElementById('confirmacao').classList.remove('hidden');
+            
+            const select = document.getElementById('servico_id');
+            const servicoOption = select.options[select.selectedIndex];
+            const barbeiroSelect = document.getElementById('barbeiro_id');
+            const barbeiroOption = barbeiroSelect.options[barbeiroSelect.selectedIndex];
+            
+            document.getElementById('confirmacaoDetalhes').innerHTML = `
+                <p><strong>Nome:</strong> ${agendamentoAtual.cliente_nome}</p>
+                <p><strong>Telefone:</strong> ${agendamentoAtual.cliente_telefone}</p>
+                <p><strong>Serviço:</strong> ${servicoOption.textContent}</p>
+                <p><strong>Barbeiro:</strong> ${barbeiroOption.textContent}</p>
+                <p><strong>Data/Hora:</strong> ${new Date(agendamentoAtual.data_hora).toLocaleString('pt-BR')}</p>
+                <hr class="my-4">
+                <button onclick="confirmarAgendamento()" class="w-full bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 font-bold">
+                    Confirmar via WhatsApp
+                </button>
+            `;
+        }
+
+        // Confirmar agendamento
+        async function confirmarAgendamento() {
+            try {
+                const res = await fetch(`${API_BASE}/agendamentos/${agendamentoAtual.id}/confirmar`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ telefone: agendamentoAtual.cliente_telefone })
+                });
+                
+                if (res.ok) {
+                    alert('Agendamento confirmado! Mensagem enviada para seu WhatsApp.');
+                    document.getElementById('agendamentoForm').reset();
+                    navigate('#home');
+                }
+            } catch (e) {
+                alert('Erro ao confirmar: ' + e.message);
+            }
+        }
+
+        // Consultar agendamentos
+        async function consultarAgendamentos() {
+            const telefone = document.getElementById('telefone_consulta').value;
+            if (!telefone) {
+                alert('Digite um telefone');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/agendamentos?telefone=${telefone}`);
+                const agendamentos = await res.json();
+                const lista = document.getElementById('agendamentosLista');
+                
+                if (agendamentos.length === 0) {
+                    lista.innerHTML = '<p class="text-gray-600 text-center">Nenhum agendamento encontrado</p>';
+                    return;
+                }
+
+                lista.innerHTML = agendamentos.map(a => `
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-sm text-gray-600">Serviço</p>
+                                <p class="font-bold">${a.servico}</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Barbeiro</p>
+                                <p class="font-bold">${a.barbeiro}</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Data/Hora</p>
+                                <p class="font-bold">${new Date(a.data_hora).toLocaleString('pt-BR')}</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Valor</p>
+                                <p class="font-bold">R$ ${a.preco.toFixed(2)}</p>
+                            </div>
+                        </div>
+                        <div class="mt-4 pt-4 border-t">
+                            <span class="inline-block px-3 py-1 rounded ${a.confirmado ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}">
+                                ${a.confirmado ? '✓ Confirmado' : '⏳ Pendente'}
+                            </span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (e) {
+                alert('Erro ao consultar: ' + e.message);
+            }
+        }
+
+        // Init
+        window.addEventListener('load', () => {
+            loadBarbeiros();
+            loadServicos();
+            
+            // Set min date to today
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('data').min = today;
+            
+            // Initial view
+            navigate('#home');
+        });
+    </script>
+</body>
+</html>
+```
+
+=== FILE: schema.sql ===
+```sql
+CREATE TABLE IF NOT EXISTS barbeiros (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT UNIQUE NOT NULL,
+    telefone TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS servicos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT UNIQUE NOT NULL,
+    preco REAL NOT NULL,
+    duracao_minutos INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agendamentos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_nome TEXT NOT NULL,
+    cliente_telefone TEXT NOT NULL,
+    barbeiro_id INTEGER NOT NULL,
+    servico_id INTEGER NOT NULL,
+    data_hora DATETIME NOT NULL,
+    confirmado BOOLEAN DEFAULT 0,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (barbeiro_id) REFERENCES barbeiros(id),
+    FOREIGN KEY (servico_id) REFERENCES servicos(id)
+);
+
+CREATE INDEX idx_agendamentos_telefone ON agendamentos(cliente_telefone);
+CREATE INDEX idx_agendamentos_barbeiro_data ON agendamentos(barbeiro_id, data_hora);
+CREATE INDEX idx_agendamentos_confirmado ON agendamentos(confirmado);
+```
