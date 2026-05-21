@@ -1,4 +1,5 @@
 from spillover.adapters.anthropic import AnthropicAdapter
+from spillover.adapters.base import Conversation, ConversationTurn
 
 
 def test_parse_minimal():
@@ -59,3 +60,42 @@ def test_parse_extra_preserved():
     conv = AnthropicAdapter().parse(payload)
     assert conv.extra.get("stream") is True
     assert conv.extra.get("metadata") == {"user_id": "abc"}
+
+
+def test_build_roundtrip_preserves_payload():
+    payload = {
+        "model": "claude-opus-4-7",
+        "max_tokens": 1024,
+        "stream": True,
+        "system": "be brief",
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ],
+    }
+    adapter = AnthropicAdapter()
+    conv = adapter.parse(payload)
+    rebuilt = adapter.build(conv)
+    assert rebuilt["model"] == payload["model"]
+    assert rebuilt["max_tokens"] == payload["max_tokens"]
+    assert rebuilt["system"] == payload["system"]
+    assert rebuilt["stream"] is True
+    assert len(rebuilt["messages"]) == 2
+    assert rebuilt["messages"][0] == {"role": "user", "content": "hi"}
+
+
+def test_build_drops_evicted_turns():
+    conv = Conversation(
+        system="s",
+        system_tokens=1,
+        turns=[
+            ConversationTurn(role="user", content="A", tool_calls=[], token_count=1),
+            ConversationTurn(role="assistant", content="B", tool_calls=[], token_count=1),
+            ConversationTurn(role="user", content="C", tool_calls=[], token_count=1),
+        ],
+        model="claude-opus-4-7",
+        max_tokens=1024,
+    )
+    conv.turns.pop(1)
+    rebuilt = AnthropicAdapter().build(conv)
+    assert [m["content"] for m in rebuilt["messages"]] == ["A", "C"]

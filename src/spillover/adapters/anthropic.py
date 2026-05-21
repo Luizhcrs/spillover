@@ -51,7 +51,17 @@ class AnthropicAdapter(Adapter):
         )
 
     def build(self, conversation: Conversation) -> dict:
-        raise NotImplementedError("build implemented in next task")
+        payload: dict = {
+            "model": conversation.model,
+            "max_tokens": conversation.max_tokens,
+            "messages": [
+                {"role": t.role, "content": t.content} for t in conversation.turns
+            ],
+        }
+        if conversation.system is not None:
+            payload["system"] = conversation.system
+        payload.update(conversation.extra)
+        return payload
 
     def _extract_tool_calls(self, content: Any) -> list[dict]:
         if not isinstance(content, list):
