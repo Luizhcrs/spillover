@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import time
 from contextlib import asynccontextmanager
@@ -29,6 +30,12 @@ from spillover.retriever.render import render_ltm_block
 from spillover.retriever.vector import vector_topk
 from spillover.storage.kuzu import open_project_kuzu
 from spillover.storage.sqlite import open_project_db
+
+_log = get_logger("proxy")
+
+
+async def _run_sync(loop, fn, *args, **kwargs):
+    return await loop.run_in_executor(None, functools.partial(fn, *args, **kwargs))
 
 
 def _extract_usage_non_streaming(
@@ -247,6 +254,56 @@ def _maybe_evict(
     return archived_ids, tokens_archived
 
 
+def _detect_and_rescue(
+    config: Config,
+    project_id: str,
+    messages: list,
+) -> tuple[list, list[str]]:
+    """Sync wrapper: detect compaction + archive rescued turns. Returns (rescued, rescue_ids)."""
+    from spillover.archive.writer import Turn, archive_raw
+    from spillover.counter_compact.detection import detect_compaction, record_seen_turns
+
+    rescue_db = open_project_db(config.db_root, project_id)
+    try:
+        rescued = detect_compaction(rescue_db, project_id, messages)
+        record_seen_turns(rescue_db, project_id, messages)
+    finally:
+        rescue_db.close()
+
+    if not rescued:
+        return [], []
+
+    rescue_db2 = open_project_db(config.db_root, project_id)
+    rescue_ids: list[str] = []
+    try:
+        rescue_ts = int(time.time() * 1000)
+        for r in rescued:
+            eid = archive_raw(
+                rescue_db2,
+                Turn(
+                    project_id=project_id,
+                    role=r.role,
+                    content=r.content,
+                    tool_calls=[],
+                    code_refs=[],
+                    token_count=r.token_count,
+                    ts=rescue_ts,
+                    compaction_rescued=True,
+                ),
+            )
+            rescue_ids.append(eid)
+        if rescue_ids:
+            placeholders = ",".join("?" for _ in rescue_ids)
+            rescue_db2.execute(
+                f"UPDATE episodes SET evicted=1, compaction_rescued=1 "
+                f"WHERE id IN ({placeholders})",
+                rescue_ids,
+            )
+    finally:
+        rescue_db2.close()
+    return rescued, rescue_ids
+
+
 def _enqueue_facets(
     app: FastAPI,
     project_id: str,
@@ -256,14 +313,23 @@ def _enqueue_facets(
     queue = getattr(app.state, "facet_queue", None)
     if queue is None:
         return
+    from spillover.metrics.registry import facet_dropped_total
     for eid in episode_ids:
-        queue.put_nowait(
-            FacetEvent(
-                project_id=project_id,
-                episode_id=eid,
-                db_root=config.db_root,
+        try:
+            queue.put_nowait(
+                FacetEvent(
+                    project_id=project_id,
+                    episode_id=eid,
+                    db_root=config.db_root,
+                )
             )
-        )
+        except asyncio.QueueFull:
+            facet_dropped_total.labels(project=project_id).inc()
+            _log.warning(
+                "facet queue full, dropping event project=%s id=%s",
+                project_id,
+                eid,
+            )
 
 
 def create_app(config: Config) -> FastAPI:
@@ -276,7 +342,7 @@ def create_app(config: Config) -> FastAPI:
 
         app.state.config = config
         app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0))
-        app.state.facet_queue = asyncio.Queue()
+        app.state.facet_queue = asyncio.Queue(maxsize=1024)
         app.state.facet_worker = FacetWorker(app.state.facet_queue)
         app.state.facet_worker.start()
         app.state.decay_scheduler = DecayScheduler(config.db_root)
@@ -307,10 +373,6 @@ def create_app(config: Config) -> FastAPI:
             )
         project_id = request.state.project_id
 
-        from spillover.counter_compact.detection import (
-            detect_compaction,
-            record_seen_turns,
-        )
         from spillover.counter_compact.intercept import (
             make_intercept_response,
             should_intercept_request,
@@ -322,56 +384,26 @@ def create_app(config: Config) -> FastAPI:
             log.info("intercept compact project=%s", project_id)
             return JSONResponse(make_intercept_response(payload), status_code=200)
 
+        loop = asyncio.get_running_loop()
+
         # Retrieval pass: inject LTM into the payload before forwarding.
         try:
             conv = adapter.parse(payload)
-            ltm_text = _retrieve_ltm_block(config, project_id, conv)
-            _inject_ltm(payload, ltm_text)
+            ltm_text = await _run_sync(loop, _retrieve_ltm_block, config, project_id, conv)
+            adapter.inject_ltm(payload, ltm_text)
         except Exception:
             log.exception(
                 "retriever failed project=%s; proceeding without LTM", project_id
             )
 
-        # Detect compaction by diffing inbound against seen_turns (Anthropic only)
-        rescued: list = []
+        # Detect compaction + rescue (Anthropic only), offloaded to executor
+        rescue_ids: list[str] = []
         if provider == "anthropic":
-            rescue_db = open_project_db(config.db_root, project_id)
-            try:
-                rescued = detect_compaction(rescue_db, project_id, payload.get("messages") or [])
-                record_seen_turns(rescue_db, project_id, payload.get("messages") or [])
-            finally:
-                rescue_db.close()
-
-        if rescued:
-            rescue_db2 = open_project_db(config.db_root, project_id)
-            try:
-                rescue_ids: list[str] = []
-                rescue_ts = int(time.time() * 1000)
-                for r in rescued:
-                    eid = archive_raw(
-                        rescue_db2,
-                        Turn(
-                            project_id=project_id,
-                            role=r.role,
-                            content=r.content,
-                            tool_calls=[],
-                            code_refs=[],
-                            token_count=r.token_count,
-                            ts=rescue_ts,
-                            compaction_rescued=True,
-                        ),
-                    )
-                    rescue_ids.append(eid)
-                if rescue_ids:
-                    placeholders = ",".join("?" for _ in rescue_ids)
-                    rescue_db2.execute(
-                        f"UPDATE episodes SET evicted=1, compaction_rescued=1 "
-                        f"WHERE id IN ({placeholders})",
-                        rescue_ids,
-                    )
-                    _enqueue_facets(app, project_id, rescue_ids, config)
-            finally:
-                rescue_db2.close()
+            _, rescue_ids = await _run_sync(
+                loop, _detect_and_rescue, config, project_id, payload.get("messages") or []
+            )
+            if rescue_ids:
+                _enqueue_facets(app, project_id, rescue_ids, config)
 
         forwarded_body = json.dumps(payload).encode("utf-8")
         fwd_headers = {
@@ -389,19 +421,16 @@ def create_app(config: Config) -> FastAPI:
             archived_ids: list[str] = []
             tokens_archived = 0
             if r.status_code == 200:
-                usage = _extract_usage_non_streaming(resp_bytes, provider)
+                usage = adapter.extract_usage_non_streaming(resp_bytes)
                 if usage is not None:
                     try:
                         resp_json = json.loads(resp_bytes)
                     except json.JSONDecodeError:
                         resp_json = {}
-                    assistant_text = "".join(
-                        b.get("text", "")
-                        for b in resp_json.get("content", [])
-                        if isinstance(b, dict)
-                    )
-                    archived_ids, tokens_archived = _maybe_evict(
-                        config, project_id, payload, assistant_text, usage, adapter
+                    assistant_text = adapter.parse_response_text(resp_json)
+                    archived_ids, tokens_archived = await _run_sync(
+                        loop, _maybe_evict,
+                        config, project_id, payload, assistant_text, usage, adapter,
                     )
                     if tokens_archived > 0:
                         try:
@@ -443,10 +472,12 @@ def create_app(config: Config) -> FastAPI:
                     await upstream.aclose()
                     archived_ids_s: list[str] = []
                     if upstream.status_code == 200:
-                        usage = _extract_usage_sse(sink)
+                        usage = adapter.extract_usage_sse(sink)
                         if usage is not None:
-                            assistant_text = _extract_assistant_text_sse(sink)
-                            archived_ids_s, _ = _maybe_evict(
+                            assistant_text = adapter.extract_assistant_text_sse(sink)
+                            _evict_loop = asyncio.get_event_loop()
+                            archived_ids_s, _ = await _run_sync(
+                                _evict_loop, _maybe_evict,
                                 config, project_id, payload, assistant_text, usage, adapter
                             )
                     if upstream.status_code >= 400:
@@ -479,11 +510,12 @@ def create_app(config: Config) -> FastAPI:
         archived_ids_buf: list[str] = []
         tokens_archived_buf = 0
         if upstream_status == 200:
-            usage = _extract_usage_sse([buf])
+            usage = adapter.extract_usage_sse([buf])
             if usage is not None:
-                assistant_text_buf = _extract_assistant_text_sse([buf])
-                archived_ids_buf, tokens_archived_buf = _maybe_evict(
-                    config, project_id, payload, assistant_text_buf, usage, adapter
+                assistant_text_buf = adapter.extract_assistant_text_sse([buf])
+                archived_ids_buf, tokens_archived_buf = await _run_sync(
+                    loop, _maybe_evict,
+                    config, project_id, payload, assistant_text_buf, usage, adapter,
                 )
         if upstream_status >= 400:
             log.warning(
