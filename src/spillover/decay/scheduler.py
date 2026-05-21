@@ -19,21 +19,21 @@ HALF_LIFE_HOURS = {
 
 
 def _apply_decay_for_project(db_root: Path, project_id: str) -> int:
-    """Recompute importance for every vec_episode in this project. Returns count."""
     db = open_project_db(db_root, project_id)
     n = 0
     try:
         rows = db.execute(
-            "SELECT episode_id, memory_type, ts FROM vec_episodes "
-            "WHERE memory_type IS NOT NULL"
+            "SELECT ve.episode_id, ve.memory_type, ve.ts, "
+            "       COALESCE(e.pinned, 0) AS pinned, "
+            "       COALESCE(e.hit_count, 0) AS hit_count "
+            "FROM vec_episodes ve "
+            "LEFT JOIN episodes e ON e.id = ve.episode_id "
+            "WHERE ve.memory_type IS NOT NULL"
         ).fetchall()
         now_ms = int(time.time() * 1000)
+        updates: list[tuple[float, str]] = []
         for r in rows:
-            pinned_row = db.execute(
-                "SELECT pinned, hit_count FROM episodes WHERE id=?",
-                (r["episode_id"],),
-            ).fetchone()
-            if pinned_row and pinned_row["pinned"] == 1:
+            if int(r["pinned"]) == 1:
                 continue
             age_hours = max(0, (now_ms - int(r["ts"])) / 1000 / 3600)
             half_life = HALF_LIFE_HOURS.get(r["memory_type"], 24)
@@ -44,13 +44,15 @@ def _apply_decay_for_project(db_root: Path, project_id: str) -> int:
                 "semantic": 0.6,
                 "episodic": 0.5,
             }.get(r["memory_type"], 0.5)
-            hit_count = int(pinned_row["hit_count"]) if pinned_row else 0
+            hit_count = int(r["hit_count"])
             new_imp = min(1.0, base * decay + min(hit_count * 0.05, 0.5))
-            db.execute(
-                "UPDATE vec_episodes SET importance=? WHERE episode_id=?",
-                (new_imp, r["episode_id"]),
-            )
+            updates.append((new_imp, r["episode_id"]))
             n += 1
+        if updates:
+            db.executemany(
+                "UPDATE vec_episodes SET importance=? WHERE episode_id=?",
+                updates,
+            )
     finally:
         db.close()
     return n
