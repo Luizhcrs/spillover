@@ -17,6 +17,9 @@ dependencies = [
     "anthropic>=0.34",
     "click>=8.1",
     "pydantic>=2.6",
+    "sqlite-vec>=0.1.6",
+    "kuzu>=0.8.0",
+    "fastembed>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +41,9 @@ packages = ["src/spillover"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra -q"
+markers = [
+    "slow: tests that download the embedding model (~130MB)",
+]
 
 [tool.ruff]
 line-length = 100

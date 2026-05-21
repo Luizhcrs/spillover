@@ -43,11 +43,58 @@ def stats(project_id: str):
         pinned = db.execute(
             "SELECT COUNT(*) FROM episodes WHERE pinned=1"
         ).fetchone()[0]
+        embedded = db.execute("SELECT COUNT(*) FROM vec_episodes").fetchone()[0]
+        pending = db.execute(
+            "SELECT COUNT(*) FROM episodes WHERE facet_pending=1"
+        ).fetchone()[0]
     finally:
         db.close()
     click.echo(f"project {project_id}: episodes: {total}")
     click.echo(f"  evicted: {evicted}")
     click.echo(f"  pinned: {pinned}")
+    click.echo(f"  embedded: {embedded}")
+    click.echo(f"  facet_pending: {pending}")
+
+
+@main.command()
+@click.argument("project_id")
+@click.argument("text")
+@click.option("--topk", default=None, type=int)
+def query(project_id: str, text: str, topk: int | None):
+    """Run the hybrid retriever ad-hoc against a project and print ranked hits."""
+    from spillover.facet.embed import embed_text
+    from spillover.facet.entities import extract_entities
+    from spillover.retriever.fusion import rrf_fuse
+    from spillover.retriever.graph import graph_walk
+    from spillover.retriever.vector import vector_topk
+    from spillover.storage.kuzu import open_project_kuzu
+
+    config = Config.from_env()
+    db = open_project_db(config.db_root, project_id)
+    try:
+        emb = embed_text(text)
+        v = vector_topk(db, emb, k=config.retriever_vector_k)
+        seeds = [e.name for e in extract_entities(text)][:20]
+        g = []
+        if seeds:
+            try:
+                kuzu_conn = open_project_kuzu(config.db_root, project_id)
+                g = graph_walk(
+                    kuzu_conn, seeds, k_hop=2, limit=config.retriever_graph_k
+                )
+            except Exception:
+                pass
+        fused = rrf_fuse(v, g)[: topk or config.retriever_topk]
+        if not fused:
+            click.echo("(no hits)")
+            return
+        for h in fused:
+            click.echo(
+                f"{h.episode_id}  score={h.score:.4f}  "
+                f"type={h.memory_type or '-'}  source={h.source}"
+            )
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

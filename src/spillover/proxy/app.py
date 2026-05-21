@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
@@ -9,13 +10,23 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from spillover.adapters.anthropic import AnthropicAdapter
+from spillover.adapters.base import Conversation
 from spillover.archive.writer import Turn, archive_raw
 from spillover.config import Config
 from spillover.eviction.selector import ActiveTurn, select_for_eviction
 from spillover.eviction.tokenizer import count_tokens
+from spillover.facet.embed import embed_text
+from spillover.facet.entities import extract_entities
+from spillover.facet.worker import FacetEvent, FacetWorker
 from spillover.logging import configure_root_logger, get_logger
 from spillover.proxy.middleware import ProjectIdMiddleware
 from spillover.proxy.streaming import duplicate_stream
+from spillover.retriever.budget import trim_to_budget
+from spillover.retriever.fusion import rrf_fuse
+from spillover.retriever.graph import graph_walk
+from spillover.retriever.render import render_ltm_block
+from spillover.retriever.vector import vector_topk
+from spillover.storage.kuzu import open_project_kuzu
 from spillover.storage.sqlite import open_project_db
 
 
@@ -31,7 +42,6 @@ def _extract_usage_non_streaming(body: bytes) -> tuple[int, int] | None:
 
 
 def _extract_usage_sse(captured: list[bytes]) -> tuple[int, int] | None:
-    """Walk captured SSE chunks for the message_stop / message_delta usage."""
     joined = b"".join(captured).decode("utf-8", errors="replace")
     input_tokens = 0
     output_tokens = 0
@@ -70,22 +80,84 @@ def _extract_assistant_text_sse(captured: list[bytes]) -> str:
     return text
 
 
+def _retrieve_ltm_block(config: Config, project_id: str, conv: Conversation) -> str:
+    """Run hybrid retrieval and return the <spillover-ltm> string (or empty)."""
+    if not conv.turns:
+        return ""
+    recent = conv.turns[-3:]
+    query_parts = []
+    for t in recent:
+        if isinstance(t.content, str):
+            query_parts.append(t.content)
+        elif isinstance(t.content, list):
+            query_parts.append(
+                " ".join(
+                    b.get("text", "")
+                    for b in t.content
+                    if isinstance(b, dict)
+                )
+            )
+    query_text = "\n".join(query_parts)
+    if not query_text.strip():
+        return ""
+
+    db = open_project_db(config.db_root, project_id)
+    try:
+        n = db.execute("SELECT COUNT(*) FROM vec_episodes").fetchone()[0]
+        if n == 0:
+            return ""
+        emb = embed_text(query_text)
+        v_hits = vector_topk(db, emb, k=config.retriever_vector_k)
+
+        seeds = [e.name for e in extract_entities(query_text)][:20]
+        g_hits: list = []
+        if seeds:
+            try:
+                kuzu_conn = open_project_kuzu(config.db_root, project_id)
+                g_hits = graph_walk(
+                    kuzu_conn, seeds, k_hop=2, limit=config.retriever_graph_k
+                )
+            except Exception:
+                log = get_logger("retriever")
+                log.exception("graph walk failed project=%s", project_id)
+
+        fused = rrf_fuse(v_hits, g_hits)[: config.retriever_topk]
+        budget = int(config.window_max * config.ltm_budget_pct)
+        trimmed = trim_to_budget(db, fused, max_tokens=budget)
+        return render_ltm_block(db, trimmed)
+    finally:
+        db.close()
+
+
+def _inject_ltm(payload: dict, ltm_text: str) -> None:
+    if not ltm_text:
+        return
+    existing = payload.get("system")
+    if existing is None:
+        payload["system"] = ltm_text
+    elif isinstance(existing, str):
+        payload["system"] = ltm_text + "\n\n" + existing
+    elif isinstance(existing, list):
+        payload["system"] = [{"type": "text", "text": ltm_text}, *existing]
+
+
 def _maybe_evict(
     config: Config,
     project_id: str,
     inbound_payload: dict,
     assistant_text: str | None,
     usage: tuple[int, int],
-) -> None:
+) -> list[str]:
+    """Return the list of episode ids archived by this call (may be empty)."""
     input_tokens, output_tokens = usage
     fill_ratio = (input_tokens + output_tokens) / config.window_max
     if fill_ratio < config.watermark:
-        return
+        return []
 
     adapter = AnthropicAdapter()
     conv = adapter.parse(inbound_payload)
     if not conv.turns:
-        return
+        return []
 
     new_user_tokens = next(
         (t.token_count for t in reversed(conv.turns) if t.role == "user"),
@@ -94,7 +166,7 @@ def _maybe_evict(
     new_assistant_tokens = count_tokens(assistant_text or "")
     tokens_to_free = new_user_tokens + new_assistant_tokens
     if tokens_to_free <= 0:
-        return
+        return []
 
     turns_by_source = {
         t.source_index: t for t in conv.turns if t.source_index is not None
@@ -114,12 +186,12 @@ def _maybe_evict(
         active, tokens_to_free=tokens_to_free, recent_buffer=4
     )
     if not result.evicted_indexes:
-        return
+        return []
 
     log = get_logger("eviction")
     log.info(
-        "eviction project=%s tokens_to_free=%d freed=%d"
-        " pass=%d budget_pressure=%s evicted_count=%d",
+        "eviction project=%s tokens_to_free=%d freed=%d pass=%d "
+        "budget_pressure=%s evicted_count=%d",
         project_id,
         tokens_to_free,
         result.tokens_freed,
@@ -127,7 +199,9 @@ def _maybe_evict(
         result.budget_pressure,
         len(result.evicted_indexes),
     )
+
     db = open_project_db(config.db_root, project_id)
+    archived_ids: list[str] = []
     try:
         ts = int(time.time() * 1000)
         episode_ids: list[str] = []
@@ -154,23 +228,49 @@ def _maybe_evict(
                 f"UPDATE episodes SET evicted=1 WHERE id IN ({placeholders})",
                 episode_ids,
             )
+            archived_ids = episode_ids
     finally:
         db.close()
+    return archived_ids
+
+
+def _enqueue_facets(
+    app: FastAPI,
+    project_id: str,
+    episode_ids: list[str],
+    config: Config,
+) -> None:
+    queue = getattr(app.state, "facet_queue", None)
+    if queue is None:
+        return
+    for eid in episode_ids:
+        queue.put_nowait(
+            FacetEvent(
+                project_id=project_id,
+                episode_id=eid,
+                db_root=config.db_root,
+            )
+        )
 
 
 def create_app(config: Config) -> FastAPI:
     configure_root_logger()
+    log = get_logger("proxy")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.config = config
         app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0))
+        app.state.facet_queue = asyncio.Queue()
+        app.state.facet_worker = FacetWorker(app.state.facet_queue)
+        app.state.facet_worker.start()
         try:
             yield
         finally:
+            await app.state.facet_worker.stop()
             await app.state.http_client.aclose()
 
-    app = FastAPI(title="spillover", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="spillover", version="0.2.0", lifespan=lifespan)
     app.add_middleware(ProjectIdMiddleware)
 
     @app.post("/v1/messages")
@@ -184,6 +284,18 @@ def create_app(config: Config) -> FastAPI:
                 status_code=400,
             )
         project_id = request.state.project_id
+
+        # Retrieval pass: inject LTM into the payload before forwarding.
+        try:
+            conv = AnthropicAdapter().parse(payload)
+            ltm_text = _retrieve_ltm_block(config, project_id, conv)
+            _inject_ltm(payload, ltm_text)
+        except Exception:
+            log.exception(
+                "retriever failed project=%s; proceeding without LTM", project_id
+            )
+
+        forwarded_body = json.dumps(payload).encode("utf-8")
         upstream_url = f"{config.upstream_base_url}/v1/messages"
         fwd_headers = {
             k: v
@@ -194,9 +306,10 @@ def create_app(config: Config) -> FastAPI:
 
         if not is_stream:
             r = await app.state.http_client.post(
-                upstream_url, headers=fwd_headers, content=body
+                upstream_url, headers=fwd_headers, content=forwarded_body
             )
             resp_bytes = r.content
+            archived_ids: list[str] = []
             if r.status_code == 200:
                 usage = _extract_usage_non_streaming(resp_bytes)
                 if usage is not None:
@@ -209,12 +322,17 @@ def create_app(config: Config) -> FastAPI:
                         for b in resp_json.get("content", [])
                         if isinstance(b, dict)
                     )
-                    _maybe_evict(
+                    archived_ids = _maybe_evict(
                         config, project_id, payload, assistant_text, usage
                     )
             if r.status_code >= 400:
-                log = get_logger("proxy")
-                log.warning("upstream non-2xx status=%d project=%s", r.status_code, project_id)
+                log.warning(
+                    "upstream non-2xx status=%d project=%s",
+                    r.status_code,
+                    project_id,
+                )
+            if archived_ids:
+                _enqueue_facets(app, project_id, archived_ids, config)
             return JSONResponse(
                 content=json.loads(resp_bytes),
                 status_code=r.status_code,
@@ -223,7 +341,7 @@ def create_app(config: Config) -> FastAPI:
 
         upstream = await app.state.http_client.send(
             app.state.http_client.build_request(
-                "POST", upstream_url, headers=fwd_headers, content=body
+                "POST", upstream_url, headers=fwd_headers, content=forwarded_body
             ),
             stream=True,
         )
@@ -235,20 +353,22 @@ def create_app(config: Config) -> FastAPI:
                     yield chunk
             finally:
                 await upstream.aclose()
+                archived_ids: list[str] = []
                 if upstream.status_code == 200:
                     usage = _extract_usage_sse(sink)
                     if usage is not None:
                         assistant_text = _extract_assistant_text_sse(sink)
-                        _maybe_evict(
+                        archived_ids = _maybe_evict(
                             config, project_id, payload, assistant_text, usage
                         )
                 if upstream.status_code >= 400:
-                    log = get_logger("proxy")
                     log.warning(
                         "upstream non-2xx (stream) status=%d project=%s",
                         upstream.status_code,
                         project_id,
                     )
+                if archived_ids:
+                    _enqueue_facets(app, project_id, archived_ids, config)
 
         return StreamingResponse(
             proxy_stream(),
