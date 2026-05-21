@@ -43,6 +43,21 @@ def test_decay_lowers_importance_with_age(tmp_path):
         db.close()
 
 
+def test_decay_tick_also_prunes_seen_turns(tmp_path):
+    from spillover.counter_compact.detection import record_seen_turns
+    from spillover.decay.scheduler import _prune_seen_turns_for_project
+    from spillover.storage.sqlite import open_project_db
+
+    db = open_project_db(tmp_path, "p1")
+    try:
+        record_seen_turns(db, "p1", [{"role": "assistant", "content": "old"}])
+        db.execute("UPDATE seen_turns SET last_seen_ts=0 WHERE project_id=?", ("p1",))
+    finally:
+        db.close()
+    pruned = _prune_seen_turns_for_project(tmp_path, "p1")
+    assert pruned == 1
+
+
 def test_decay_skips_pinned(tmp_path):
     db = open_project_db(tmp_path, "p1")
     try:

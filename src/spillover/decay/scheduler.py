@@ -58,6 +58,15 @@ def _apply_decay_for_project(db_root: Path, project_id: str) -> int:
     return n
 
 
+def _prune_seen_turns_for_project(db_root: Path, project_id: str) -> int:
+    from spillover.counter_compact.detection import prune_old_seen_turns
+    db = open_project_db(db_root, project_id)
+    try:
+        return prune_old_seen_turns(db, project_id, ttl_hours=72)
+    finally:
+        db.close()
+
+
 class DecayScheduler:
     def __init__(self, db_root: Path, interval_seconds: int = 6 * 3600):
         self.db_root = db_root
@@ -100,8 +109,14 @@ class DecayScheduler:
             if not pdir.is_dir():
                 continue
             pid = pdir.name
-            n = await loop.run_in_executor(
+            n_decayed = await loop.run_in_executor(
                 None, _apply_decay_for_project, self.db_root, pid
             )
-            if n > 0:
-                log.info("decay project=%s updated=%d", pid, n)
+            n_pruned = await loop.run_in_executor(
+                None, _prune_seen_turns_for_project, self.db_root, pid
+            )
+            if n_decayed > 0 or n_pruned > 0:
+                log.info(
+                    "decay project=%s decayed=%d pruned=%d",
+                    pid, n_decayed, n_pruned,
+                )
