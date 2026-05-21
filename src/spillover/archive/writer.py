@@ -60,6 +60,18 @@ def archive_raw(db: sqlite3.Connection, turn: Turn) -> str:
                 1 if turn.compaction_rescued else 0,
             ),
         )
+        body_text = (
+            turn.content
+            if isinstance(turn.content, str)
+            else json.dumps(turn.content, ensure_ascii=False)
+        )
+        try:
+            db.execute(
+                "INSERT INTO episodes_fts(episode_id, body) VALUES (?, ?)",
+                (eid, body_text),
+            )
+        except sqlite3.IntegrityError:
+            pass  # already indexed
         return eid
     except sqlite3.IntegrityError:
         existing = db.execute(
