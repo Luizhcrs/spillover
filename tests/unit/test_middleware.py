@@ -33,7 +33,15 @@ def test_middleware_hashes_arbitrary_path_when_unhashed(client):
     assert r.json()["project_id"] == expected
 
 
-def test_middleware_400_when_missing(client):
+def test_middleware_400_when_missing(client, monkeypatch):
+    monkeypatch.delenv("SPILLOVER_PROJECT_ID", raising=False)
     r = client.get("/echo")
     assert r.status_code == 400
     assert "X-Project" in r.text
+
+
+def test_middleware_falls_back_to_env(client, monkeypatch):
+    monkeypatch.setenv("SPILLOVER_PROJECT_ID", "deadbeefcafe")
+    r = client.get("/echo")
+    assert r.status_code == 200
+    assert r.json()["project_id"] == "deadbeefcafe"
