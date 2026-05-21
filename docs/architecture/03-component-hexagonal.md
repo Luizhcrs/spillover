@@ -1,6 +1,6 @@
-# 03 — Component (C4 Level 3): Hexagonal layers
+# 03 — Componentes (C4 Nivel 3): camadas hexagonais
 
-Spillover follows the ports-and-adapters pattern (Cockburn): pure domain logic at the centre, application use cases orchestrating it, inbound adapters driving the system, outbound adapters serving it.
+spillover segue o pattern ports-and-adapters (Cockburn): logica de dominio pura no centro, casos de uso da camada de aplicacao orquestrando, inbound adapters dirigindo, outbound adapters servindo.
 
 ```mermaid
 graph TB
@@ -9,39 +9,39 @@ graph TB
     classDef domain fill:#d84315,stroke:#fff,color:#fff
     classDef outbound fill:#2e7d32,stroke:#fff,color:#fff
 
-    subgraph "INBOUND ADAPTERS (driving)"
-        http["FastAPI Routes<br/>POST /v1/messages<br/>POST /v1/chat/completions<br/>GET /metrics<br/>GET /health"]:::inbound
-        cli["Click CLI<br/>up / stats / query /<br/>bench / bench-long /<br/>bench-logic / bench-heavy"]:::inbound
-        sched["Schedulers<br/>FacetWorker (queue consumer)<br/>DecayScheduler (6h cron)"]:::inbound
-        mid["ProjectIdMiddleware<br/>resolves /p/&lt;id&gt; OR<br/>X-Project header OR<br/>SPILLOVER_PROJECT_ID env"]:::inbound
+    subgraph "INBOUND ADAPTERS (dirigem)"
+        http["Rotas FastAPI<br/>POST /v1/messages<br/>POST /v1/chat/completions<br/>GET /metrics<br/>GET /health"]:::inbound
+        cli["CLI Click<br/>up / stats / query /<br/>bench / bench-long /<br/>bench-logic / bench-heavy"]:::inbound
+        sched["Schedulers<br/>FacetWorker (consumidor de fila)<br/>DecayScheduler (cron 6h)"]:::inbound
+        mid["ProjectIdMiddleware<br/>resolve /p/&lt;id&gt; OU<br/>header X-Project OU<br/>env SPILLOVER_PROJECT_ID"]:::inbound
     end
 
-    subgraph "APPLICATION (use cases)"
+    subgraph "APLICACAO (casos de uso)"
         handle["HandleInboundRequest<br/>intercept → retrieve →<br/>inject → forward →<br/>rescue → evict → enqueue →<br/>rewrite"]:::application
         facet_uc["ProcessFacets<br/>embed + classify +<br/>extract + index"]:::application
         decay_uc["DecayImportance<br/>+ prune seen_turns"]:::application
-        rescue_uc["RescueCompactedTurns<br/>diff + archive as rescued"]:::application
+        rescue_uc["RescueCompactedTurns<br/>diff + archive como rescued"]:::application
         bench_uc["BenchHarness<br/>A/B vs vanilla"]:::application
     end
 
-    subgraph "DOMAIN (pure)"
-        entities["<b>Entities</b><br/>Episode, Turn, Hit,<br/>Conversation,<br/>ConversationTurn,<br/>SeenTurn, FacetEvent"]:::domain
+    subgraph "DOMINIO (puro)"
+        entities["<b>Entidades</b><br/>Episode, Turn, Hit,<br/>Conversation,<br/>ConversationTurn,<br/>SeenTurn, FacetEvent"]:::domain
         values["<b>Value Objects</b><br/>MemoryType, BudgetProfile,<br/>TokenPlan, SelectionResult,<br/>Entity, Decision, CodeRef"]:::domain
-        policies["<b>Policies (pure fns)</b><br/>select_for_eviction (3-pass)<br/>rrf_fuse + type weights<br/>importance decay formula<br/>classify (5-way)<br/>extract_entities/decisions/<br/>code_refs/open_tasks<br/>compaction diff<br/>usage_rewrite<br/>sse_rewrite<br/>should_intercept_request"]:::domain
+        policies["<b>Policies (funcoes puras)</b><br/>select_for_eviction (3-pass)<br/>rrf_fuse + type weights<br/>formula importance decay<br/>classify (5-way)<br/>extract_entities/decisions/<br/>code_refs/open_tasks<br/>diff de compaction<br/>usage_rewrite<br/>sse_rewrite<br/>should_intercept_request"]:::domain
     end
 
-    subgraph "OUTBOUND ADAPTERS (driven)"
-        repo[("EpisodeRepo<br/>SQLite<br/>episodes table")]:::outbound
-        seen[("SeenTurnRepo<br/>SQLite<br/>seen_turns table")]:::outbound
+    subgraph "OUTBOUND ADAPTERS (servem)"
+        repo[("EpisodeRepo<br/>SQLite<br/>tabela episodes")]:::outbound
+        seen[("SeenTurnRepo<br/>SQLite<br/>tabela seen_turns")]:::outbound
         vec[("VectorIndex<br/>sqlite-vec<br/>vec_episodes")]:::outbound
         fts[("LexicalIndex<br/>SQLite FTS5<br/>episodes_fts<br/>tokenchars ./_-:")]:::outbound
-        graph[("GraphIndex<br/>Kuzu<br/>cached LRU 32")]:::outbound
+        graph[("GraphIndex<br/>Kuzu<br/>cache LRU 32")]:::outbound
         embed["Embedder<br/>fastembed<br/>nomic-embed-text-v1.5-Q"]:::outbound
         anth["AnthropicClient<br/>adapters/anthropic.py<br/>+ httpx + retry"]:::outbound
         oai["OpenAIClient<br/>adapters/openai.py<br/>+ httpx + retry"]:::outbound
         metrics["MetricsSink<br/>prometheus_client"]:::outbound
         log["Logger<br/>stdlib + redact()"]:::outbound
-        tok["Tokenizer<br/>char/4 heuristic<br/>lru_cache 4096"]:::outbound
+        tok["Tokenizer<br/>heuristica char/4<br/>lru_cache 4096"]:::outbound
     end
 
     http --> mid
@@ -84,79 +84,79 @@ graph TB
     bench_uc --> oai
 ```
 
-## Domain — pure modules
+## Dominio — modulos puros
 
-Zero I/O. Tested without mocks.
+Zero I/O. Testaveis sem mocks.
 
-| file | content |
+| arquivo | conteudo |
 |---|---|
 | `adapters/base.py` | `Conversation`, `ConversationTurn` |
-| `archive/writer.py` | `Turn` entity, `_hash_turn` |
-| `eviction/selector.py` | `ActiveTurn`, `SelectionResult`, `select_for_eviction` (3-pass policy) |
-| `eviction/tokenizer.py` | `count_tokens` (char/4 heuristic + lru_cache) |
+| `archive/writer.py` | entidade `Turn`, `_hash_turn` |
+| `eviction/selector.py` | `ActiveTurn`, `SelectionResult`, `select_for_eviction` (politica 3-pass) |
+| `eviction/tokenizer.py` | `count_tokens` (heuristica char/4 + lru_cache) |
 | `facet/classifier.py` | `classify` (5-way: priority/procedural/semantic/episodic/task) |
-| `facet/entities.py` | `Entity`, `extract_entities` (file/url/identifier/command regex) |
+| `facet/entities.py` | `Entity`, `extract_entities` (regex file/url/identifier/command) |
 | `facet/decisions.py` | `Decision`, `CodeRef`, `extract_decisions`, `extract_code_refs` |
 | `facet/tasks.py` | `has_open_task` (TODO/FIXME/pending PT-BR + EN) |
-| `retriever/vector.py` | `Hit` value object |
-| `retriever/fusion.py` | `rrf_fuse` + type-weight constants |
+| `retriever/vector.py` | value object `Hit` |
+| `retriever/fusion.py` | `rrf_fuse` + constantes de type-weight |
 | `budget/profile.py` | `BudgetProfile`, `select_profile` |
 | `budget/plan.py` | `TokenPlan`, `plan_from_config` |
 | `counter_compact/usage_rewrite.py` | `rewrite_usage`, `rewrite_response_json` |
 | `counter_compact/sse_rewrite.py` | `rewrite_sse_body`, `has_usage_marker` |
 | `counter_compact/intercept.py` | `should_intercept_request`, `make_intercept_response` |
-| `counter_compact/detection.py` (hash helpers) | `_hash_assistant_message` |
-| `decay/scheduler.py` (constants + formula) | `HALF_LIFE_HOURS`, `_base_importance` |
+| `counter_compact/detection.py` (helpers de hash) | `_hash_assistant_message` |
+| `decay/scheduler.py` (constantes + formula) | `HALF_LIFE_HOURS`, `_base_importance` |
 
-## Application — use cases
+## Aplicacao — casos de uso
 
-Orchestrate domain policies through outbound ports.
+Orquestram policies de dominio atraves de ports outbound.
 
-| use case | implementation locus |
+| caso de uso | onde mora |
 |---|---|
 | HandleInboundRequest | `proxy/app._handle_request` |
 | ProcessFacets | `facet/worker._process_one` |
 | DecayImportance | `decay/scheduler._apply_decay_for_project` |
-| RescueCompactedTurns | `counter_compact/detection.detect_compaction` + proxy rescue block |
+| RescueCompactedTurns | `counter_compact/detection.detect_compaction` + bloco de rescue do proxy |
 | AdHocRetrieval | `cli.query` |
 | BenchHarness | `bench/runner` + `bench/long_conversation` + `bench/landing_page_scenario` + `bench/heavy_stress` |
 
-## Inbound — driving adapters
+## Inbound — adapters dirigentes
 
-| adapter | tech | what it drives |
+| adapter | tech | o que dirige |
 |---|---|---|
-| FastAPI proxy | FastAPI + asyncio + lifespan | HTTP routes for /v1/messages, /v1/chat/completions, /metrics, /health, / |
-| `ProjectIdMiddleware` | Starlette middleware | project_id resolution (path > header > env) |
-| Click CLI | Click + uvicorn | up / stats / query / bench / bench-long / bench-logic / bench-heavy |
-| Decay loop | asyncio task in lifespan | DecayImportance every 6h |
-| Facet worker | asyncio.Queue consumer | ProcessFacets per dequeued event |
+| Proxy FastAPI | FastAPI + asyncio + lifespan | rotas HTTP pra /v1/messages, /v1/chat/completions, /metrics, /health, / |
+| `ProjectIdMiddleware` | middleware Starlette | resolucao de project_id (path > header > env) |
+| CLI Click | Click + uvicorn | up / stats / query / bench / bench-long / bench-logic / bench-heavy |
+| Loop de decay | asyncio task no lifespan | DecayImportance a cada 6h |
+| Facet worker | consumidor asyncio.Queue | ProcessFacets por evento dequeued |
 | Wrappers | Click + subprocess | spillover-cc / -codex / -cursor / -continue |
 
-## Outbound — driven adapters
+## Outbound — adapters servientes
 
 | port | adapter | tech |
 |---|---|---|
 | EpisodeRepo | `archive/writer.archive_raw` + `storage/sqlite.open_project_db` | SQLite (WAL, UNIQUE hash) |
-| SeenTurnRepo | `counter_compact/detection.record_seen_turns` + `prune_old_seen_turns` | SQLite (composite PK) |
-| VectorIndex | `retriever/vector.vector_topk` + `facet/worker` writes | sqlite-vec virtual table |
-| LexicalIndex | `retriever/lexical.bm25_topk` + `archive/writer` INSERT | SQLite FTS5 |
-| GraphIndex | `retriever/graph.graph_walk` + `retriever/causal.causality_chain` + `facet/worker` MERGE | Kuzu embedded, LRU 32 |
-| Embedder | `facet/embed.embed_text` | fastembed (nomic-embed-text-v1.5-Q ONNX, 768 dim) |
-| Tokenizer | `eviction/tokenizer.count_tokens` | char/4 heuristic memoised lru_cache 4096 |
-| ProviderClient (Anthropic) | `adapters/anthropic.AnthropicAdapter` + httpx in `proxy/app` | httpx → api.anthropic.com /v1/messages |
-| ProviderClient (OpenAI) | `adapters/openai.OpenAIAdapter` + httpx in `proxy/app` | httpx → api.openai.com /v1/chat/completions |
-| ProviderClient retry | `proxy/retry.with_retry` | exponential backoff 3x on 429/5xx/timeout |
+| SeenTurnRepo | `counter_compact/detection.record_seen_turns` + `prune_old_seen_turns` | SQLite (PK composta) |
+| VectorIndex | `retriever/vector.vector_topk` + escritas do `facet/worker` | tabela virtual sqlite-vec |
+| LexicalIndex | `retriever/lexical.bm25_topk` + INSERT do `archive/writer` | SQLite FTS5 |
+| GraphIndex | `retriever/graph.graph_walk` + `retriever/causal.causality_chain` + MERGE do `facet/worker` | Kuzu embedded, LRU 32 |
+| Embedder | `facet/embed.embed_text` | fastembed (ONNX nomic-embed-text-v1.5-Q, 768 dim) |
+| Tokenizer | `eviction/tokenizer.count_tokens` | heuristica char/4 memoizada lru_cache 4096 |
+| ProviderClient (Anthropic) | `adapters/anthropic.AnthropicAdapter` + httpx em `proxy/app` | httpx → api.anthropic.com /v1/messages |
+| ProviderClient (OpenAI) | `adapters/openai.OpenAIAdapter` + httpx em `proxy/app` | httpx → api.openai.com /v1/chat/completions |
+| Retry ProviderClient | `proxy/retry.with_retry` | exponential backoff 3x em 429/5xx/timeout |
 | MetricsSink | `metrics/registry` | prometheus_client (Counter/Gauge/Histogram) |
-| Logger | `logging.get_logger` + `redact()` | stdlib logging with header redaction |
+| Logger | `logging.get_logger` + `redact()` | logging stdlib com redaction de header |
 
-## Pragmatic deviations from strict hexagonal
+## Desvios pragmaticos do hexagonal estrito
 
-Spillover is hexagonal-by-feature, not by-layer. Honest deviations:
+spillover e hexagonal-por-feature, nao hexagonal-por-camada. Desvios honestos:
 
-1. `proxy/app.py` mixes layers — `_retrieve_ltm_block` calls outbound adapters directly without going through an explicit port interface.
-2. `facet/worker._process_one` calls `open_project_db`, `open_project_kuzu`, `embed_text` directly.
-3. `Tokenizer` and `Clock` have no formal port — used via direct stdlib imports.
-4. The word "adapter" in `adapters/anthropic.py` and `adapters/openai.py` means *wire-format adapter* (parse JSON ↔ Conversation), not *hexagonal outbound adapter*.
-5. No DI container; dependencies resolve via module-level imports.
+1. `proxy/app.py` mistura camadas — `_retrieve_ltm_block` chama outbound adapters direto sem interface intermediaria.
+2. `facet/worker._process_one` chama `open_project_db`, `open_project_kuzu`, `embed_text` direto.
+3. `Tokenizer` e `Clock` nao tem port formal — usados via imports stdlib direto.
+4. A palavra "adapter" em `adapters/anthropic.py` e `adapters/openai.py` significa *adapter de wire-format* (parse JSON ↔ Conversation), nao *outbound adapter hexagonal*.
+5. Sem container de DI; dependencias resolvem via imports module-level.
 
-These are deliberate. Strict hexagonal refactor is a [follow-up](../superpowers/plans/) worth ~3–4 days, only justified if the codebase grows past ~5k LOC or the deployment model changes to multi-tenant SaaS.
+Sao desvios deliberados. Refactor estrito pra hexagonal e um [follow-up](../superpowers/plans/) de ~3-4 dias, soh justificado se a codebase passar de ~5k LOC ou o modelo de deploy mudar pra SaaS multi-tenant.

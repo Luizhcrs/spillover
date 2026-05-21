@@ -1,12 +1,12 @@
 # 10 — Performance: heavy-stress bench (v1.6.1)
 
-Real Anthropic Haiku 4.5 traffic, 400 turns of synthetic engineering conversation (~80 k chars / ~22 k Anthropic tokens), 4 anchored facts placed at turns 5, 50, 100, 150. Final question requests all 4.
+Trafego real Anthropic Haiku 4.5, 400 turnos de conversa de engenharia sintetica (~80 k chars / ~22 k tokens Anthropic), 4 fatos ancorados nos turnos 5, 50, 100, 150. Pergunta final pede todos os 4.
 
 ## Headline
 
 ```mermaid
 xychart-beta
-    title "Anchor recall (out of 4 facts spread across 400 turns)"
+    title "Recall dos anchors (4 fatos espalhados em 400 turnos)"
     x-axis ["vanilla_truncated", "spillover"]
     y-axis "Anchors hit / 4" 0 --> 4
     bar [0, 4]
@@ -14,7 +14,7 @@ xychart-beta
 
 ```mermaid
 xychart-beta
-    title "Tokens sent to Anthropic"
+    title "Tokens enviados pra Anthropic"
     x-axis ["vanilla_truncated", "spillover"]
     y-axis "Tokens" 0 --> 25000
     bar [767, 22541]
@@ -22,85 +22,85 @@ xychart-beta
 
 ```mermaid
 xychart-beta
-    title "End-to-end latency (ms)"
+    title "Latencia end-to-end (ms)"
     x-axis ["vanilla_truncated", "spillover"]
-    y-axis "milliseconds" 0 --> 7000
+    y-axis "milissegundos" 0 --> 7000
     bar [6752, 4401]
 ```
 
-## Full numbers
+## Numeros completos
 
-| metric | vanilla_truncated | spillover |
+| metrica | vanilla_truncated | spillover |
 |---|---:|---:|
-| anchors-hit (literal substring) | 0/4 | **3/4** |
-| anchors-hit (semantic recall) | 0/4 | **4/4** |
-| turns sent | 13 | 401 |
-| chars sent | 2,709 | 81,165 |
+| anchors-hit (substring literal) | 0/4 | **3/4** |
+| anchors-hit (recall semantica) | 0/4 | **4/4** |
+| turnos enviados | 13 | 401 |
+| chars enviados | 2,709 | 81,165 |
 | visible input_tokens | 767 | 22,320 |
 | spillover_real_input_tokens | — | 22,541 |
 | output_tokens | 298 | 147 |
-| latency_ms | 6,752 | **4,401** (faster) |
+| latency_ms | 6,752 | **4,401** (mais rapido) |
 | errors | 0 | 0 |
-| eviction count | n/a | 1 round, 4 turns archived |
-| DB size after run | n/a | 3.3 MB |
+| eviction count | n/a | 1 rodada, 4 turnos arquivados |
+| tamanho do DB apos run | n/a | 3.3 MB |
 
-The single literal "miss" was `middleware.py:42` — model said `middleware.py line 42` (natural language, same fact). Semantic recall is 4/4.
+A unica "miss" literal foi `middleware.py:42` — modelo escreveu `middleware.py line 42` (linguagem natural, mesmo fato). Recall semantica e 4/4.
 
-## Vanilla response (proof of failure)
+## Resposta do vanilla (prova de falha)
 
-> I need to be honest: I cannot reliably recall those four specific facts from our conversation history.
+> Preciso ser honesto: nao consigo recall confiavel desses quatro fatos especificos do nosso historico de conversa.
 >
-> Looking back at what we've discussed, I see:
-> - Database: Kuzu is mentioned (iteration 197–198) as a graph database for the schema, but I don't have context on why it was chosen over alternatives…
-> - Auth bug: You mentioned checking "imports for circular dependencies in the auth module" (iteration 195) and it came back clean, but I have no record of where a bug actually was…
-> - Spillover port: I don't see any mention of a port number…
-> - Importance decay formula: I see references to type-weights (1.5, 1.2, 1.4, 1.0, 1.0) but no explicit decay formula
+> Olhando o que discutimos, vejo:
+> - Banco de dados: Kuzu e mencionado (iteracao 197–198) como grafo pro schema, mas nao tenho contexto de por que foi escolhido sobre alternativas…
+> - Bug de auth: voce mencionou checar "imports de dependencias circulares no modulo auth" (iteracao 195) e ficou limpo, mas nao tenho registro de onde o bug realmente estava…
+> - Porta do spillover: nao vejo mencao a numero de porta…
+> - Formula de decay importance: vejo referencias a type-weights (1.5, 1.2, 1.4, 1.0, 1.0) mas nenhuma formula explicita de decay
 
-Honest failure. The model knows it doesn't know.
+Falha honesta. Modelo sabe que nao sabe.
 
-## Spillover response (proof of recall)
+## Resposta do spillover (prova de recall)
 
-> (1) Database choice: SQLite over Postgres because 'deployment is local-only zero-infra few-hundred-GB max'
+> (1) Escolha do banco: SQLite sobre Postgres porque 'deployment is local-only zero-infra few-hundred-GB max'
 >
-> (2) Auth bug location: middleware.py line 42 — 'jwt expiry comparison uses < instead of <='
+> (2) Local do bug de auth: middleware.py line 42 — 'jwt expiry comparison uses < instead of <='
 >
-> (3) Spillover proxy port: 8787 — 'chosen because mneme is 7777 and we wanted visually distinct close numbers'
+> (3) Porta do proxy spillover: 8787 — 'chosen because mneme is 7777 and we wanted visually distinct close numbers'
 >
-> (4) Importance decay formula: base × exp(-age/half_life) + min(hit_count×0.05, 0.5)
+> (4) Formula de decay importance: base × exp(-age/half_life) + min(hit_count×0.05, 0.5)
 
-All four facts cited verbatim with the exact reasoning from the anchored turns. Including inline quote marks around the original phrasing.
+Os 4 fatos citados verbatim com o raciocinio exato dos turnos ancorados. Incluindo aspas inline em volta do fraseio original.
 
-## Token economics
+## Economia de tokens
 
-| flow | tokens |
+| fluxo | tokens |
 |---|---:|
-| Conversation payload sent to proxy | ~50 k (raw) |
-| Tokens evicted to archive | ~28 k |
-| Tokens forwarded to Anthropic | 22,541 (real) |
-| Reduction via eviction | ~60% |
-| Tokens visible to client | 22,320 |
-| Usage rewrite hidden delta | 221 |
+| Payload da conversa enviado ao proxy | ~50 k (raw) |
+| Tokens evicted pro archive | ~28 k |
+| Tokens encaminhados pra Anthropic | 22,541 (real) |
+| Reducao via eviction | ~60% |
+| Tokens visiveis ao cliente | 22,320 |
+| Delta escondido do usage rewrite | 221 |
 
-## Per-leg retriever attribution
+## Atribuicao por perna do retriever
 
-From `/metrics` after the run:
+Do `/metrics` apos o run:
 
-| leg | hits |
+| perna | hits |
 |---|---:|
 | vector | 50 |
 | graph | 0 |
 | bm25 | 25 |
 | causal | 0 |
 
-At this dataset size (4 archived episodes), vector + BM25 alone carry recall. Graph and causal legs activate at larger scale.
+Neste tamanho de dataset (4 episodios arquivados soh), vector + BM25 carregaram o recall sozinhos. Pernas graph e causal ativam em escala maior.
 
-## What it proves
+## O que prova
 
-1. **End-to-end correctness at scale.** 400-turn payload processed, served back in 4.4 s with no errors.
-2. **Counter-compaction invisible.** Client saw `input_tokens=22320` even though real Anthropic cost was 22,541.
-3. **Semantic recall 100% on the dataset.** All four anchored facts recovered with verbatim quoting.
-4. **Vanilla truncation is brittle.** Tail-12-turns truncation = 0/4 anchors. The model honestly says "I cannot recall".
-5. **Latency competitive.** spillover faster than vanilla truncated despite processing 30× more characters (Anthropic latency dominated; Haiku spent vanilla's time generating "I don't know" four times).
+1. **Correctness end-to-end em escala.** Payload de 400 turnos processado, retornado em 4.4 s, zero erros.
+2. **Counter-compaction invisivel.** Cliente viu `input_tokens=22320` apesar do custo real Anthropic-side ser 22,541.
+3. **Recall semantica 100% no dataset.** Todos 4 fatos ancorados recuperados com quoting verbatim.
+4. **Truncacao vanilla e fragil.** Tail-12-turnos truncacao = 0/4 anchors. Modelo honestamente diz "nao consigo lembrar".
+5. **Latencia competitiva.** spillover mais rapido que vanilla truncado apesar de processar 30× mais chars (latencia Anthropic dominou; Haiku gastou o tempo do vanilla gerando "nao sei" quatro vezes).
 
 ## Repro
 
@@ -115,13 +115,13 @@ spillover bench-heavy \
   --model claude-haiku-4-5-20251001
 ```
 
-Cost per run: ~$0.05 in Haiku tokens.
+Custo por run: ~$0.05 em tokens Haiku.
 
-## What is *not* tested
+## O que NAO foi testado
 
-- Streaming under heavy load (this bench was non-streaming).
-- Concurrent requests against the same project DB (SQLite write lock would serialise).
-- Sustained sessions over hours (eviction repeats; DB growth not measured at scale).
-- Sonnet/Opus performance (likely better, untested).
+- Streaming sob carga pesada (este bench foi non-streaming).
+- Requests concorrentes contra o mesmo DB de projeto (write lock do SQLite serializaria).
+- Sessoes sustentadas por horas (eviction repete; crescimento do DB nao medido em escala).
+- Performance Sonnet/Opus (provavel melhor, nao testado).
 
-These are [Plan 11](../superpowers/plans/) candidates.
+Sao candidatos do [Plan 11](../superpowers/plans/).

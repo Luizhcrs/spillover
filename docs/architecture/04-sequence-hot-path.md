@@ -1,6 +1,6 @@
-# 04 — Sequence: inbound request hot path
+# 04 — Sequencia: hot path de request inbound
 
-End-to-end trace of a single `POST /v1/messages` (or `/v1/chat/completions`) routed through spillover.
+Trace end-to-end de um unico `POST /v1/messages` (ou `/v1/chat/completions`) roteado por spillover.
 
 ```mermaid
 sequenceDiagram
@@ -17,43 +17,43 @@ sequenceDiagram
     participant M as MetricsSink
 
     CLI->>+Mid: POST /p/&lt;sha1&gt;/v1/messages
-    Mid->>Mid: extract project_id<br/>(path > header > env)
-    Mid->>+App: dispatch with state.project_id
+    Mid->>Mid: extrai project_id<br/>(path > header > env)
+    Mid->>+App: dispatch com state.project_id
 
     App->>Adp: parse(payload) → Conversation
     App->>App: should_intercept_request?
-    Note over App: if compact prompt:<br/>return synthetic 200,<br/>skip Anthropic call
+    Note over App: se prompt de compact:<br/>retorna 200 sintetico,<br/>pula chamada Anthropic
 
     App->>+Ret: retrieve_ltm_block(conv, project_id)
-    Ret->>Ret: embed_text(last 3 turns)
+    Ret->>Ret: embed_text(ultimos 3 turnos)
     Ret->>Ret: vector_topk (sqlite-vec)
     Ret->>Ret: extract_entities → graph_walk (Kuzu)
     Ret->>Ret: bm25_topk (FTS5)
     Ret->>Ret: causality_chain (Kuzu AFTER)
-    Ret->>Ret: rrf_fuse(4 legs) → top-K
+    Ret->>Ret: rrf_fuse(4 pernas) → top-K
     Ret->>Ret: trim_to_budget
     Ret->>Ret: render_ltm_block
     Ret-->>-App: ltm_text
 
     App->>Adp: inject_ltm(payload, ltm_text)<br/>placement = between/turns/user/system
 
-    App->>App: detect_compaction(seen_turns diff)
-    Note over App: if rescued turns:<br/>archive as compaction_rescued=1,<br/>enqueue facets
+    App->>App: detect_compaction(diff seen_turns)
+    Note over App: se turnos rescued:<br/>archive como compaction_rescued=1,<br/>enfileira facets
 
     App->>App: record_seen_turns
 
-    App->>+Prov: httpx POST (with retry 3x backoff)<br/>forwarded headers + LTM-injected body
+    App->>+Prov: httpx POST (com retry 3x backoff)<br/>headers forwarded + body com LTM injected
     Prov-->>-App: response (200 + usage)
 
     App->>Adp: extract_assistant_text
     App->>+Evt: select_for_eviction<br/>(tokens_to_free = new_user + new_assistant)
     Evt->>Evt: Pass 1: FIFO non-priority
-    Evt->>Evt: Pass 2: priority fallback
+    Evt->>Evt: Pass 2: fallback priority
     Evt->>Evt: Pass 3: budget pressure
     Evt-->>-App: SelectionResult
 
-    App->>+Arc: archive_raw for each evicted turn
-    Arc->>Arc: sha256 dedup → INSERT episodes<br/>+ INSERT episodes_fts
+    App->>+Arc: archive_raw pra cada turno evicted
+    Arc->>Arc: dedup sha256 → INSERT episodes<br/>+ INSERT episodes_fts
     Arc-->>-App: episode_ids
 
     App->>Q: put_nowait(FacetEvent × N)
@@ -62,45 +62,45 @@ sequenceDiagram
     App->>Adp: rewrite_usage<br/>(real - archived = visible)
     App->>M: requests_total++, overflow++,<br/>episodes_archived++
 
-    App-->>-Mid: 200 OK with rewritten usage
+    App-->>-Mid: 200 OK com usage rewritten
     Mid-->>-CLI: response
 ```
 
-## Phases
+## Fases
 
-| phase | step range | sync/async | notes |
+| fase | range de passos | sync/async | notas |
 |---|---|---|---|
-| Project resolution | 1–2 | sync (middleware) | ~0 ms |
-| Adapter parse | 3 | sync | <1 ms |
-| Intercept check | 4 | sync, pure | short-circuits before any retrieval if matched |
-| Retrieval | 5–13 | sync via executor | embedder cold start can be slow; cached path is fast |
-| LTM injection | 14 | sync | payload mutation only |
-| Compaction detection + rescue | 15–17 | sync | diff against `seen_turns` |
-| Forward | 18–19 | async (httpx) | dominant latency contributor |
-| Eviction | 20–22 | sync via executor | 3-pass policy |
-| Archive | 23–24 | sync via executor | SQLite WAL write |
-| Facet enqueue | 25 | async non-blocking | facet pipeline runs after response |
-| Usage rewrite | 26 | sync, pure | `real - archived = visible` |
-| Metrics | 27 | sync, lock-free | prometheus_client thread-safe |
-| Response | 28–29 | sync | streaming or non-streaming |
+| Resolucao de projeto | 1–2 | sync (middleware) | ~0 ms |
+| Parse do adapter | 3 | sync | <1 ms |
+| Check de intercept | 4 | sync, pura | curto-circuita antes de retrieval/forward se bater |
+| Retrieval | 5–13 | sync via executor | cold start do embedder pode ser lento; cached e rapido |
+| Injecao de LTM | 14 | sync | so mutacao de payload |
+| Detection + rescue de compaction | 15–17 | sync | diff contra `seen_turns` |
+| Forward | 18–19 | async (httpx) | contribuinte dominante de latencia |
+| Eviction | 20–22 | sync via executor | politica 3-pass |
+| Archive | 23–24 | sync via executor | escrita SQLite WAL |
+| Enqueue de facet | 25 | async non-blocking | pipeline de facet roda depois da resposta |
+| Usage rewrite | 26 | sync, pura | `real - archived = visible` |
+| Metricas | 27 | sync, lock-free | prometheus_client e thread-safe |
+| Resposta | 28–29 | sync | streaming ou non-streaming |
 
-## Latency budget (observed, Haiku 4.5 heavy bench)
+## Budget de latencia (observado, heavy bench Haiku 4.5)
 
-| phase | budget | observed |
+| fase | budget | observado |
 |---|---:|---:|
-| Retrieval (cached embedder) | <100 ms p99 | ~50 ms |
-| Forward to Anthropic | depends on payload | 2–4 s for 22 k tokens |
+| Retrieval (embedder cached) | <100 ms p99 | ~50 ms |
+| Forward pra Anthropic | depende do payload | 2–4 s pra 22 k tokens |
 | Eviction + archive | <50 ms | ~10–20 ms |
-| Total round-trip | matches Anthropic latency | 4.4 s heavy bench |
+| Round-trip total | bate com latencia da Anthropic | 4.4 s no heavy bench |
 
-## Failure modes
+## Modos de falha
 
-| step | failure | handling |
+| passo | falha | tratamento |
 |---|---|---|
-| 5–13 | embedder cold-start hang | `_log.exception`; LTM block becomes empty; request still forwards |
-| 18–19 | upstream 5xx / timeout | `with_retry` 3x exponential backoff; final fail returns 5xx |
-| 18–19 | upstream 4xx | returns 4xx verbatim; no eviction |
-| 20–22 | selection pressure (Pass 3) | budget_pressure=True logged; partial eviction kept |
-| 23–24 | SQLite UNIQUE violation on hash | dedup path: return existing id |
-| 25 | facet queue full | drop + facet_dropped_total counter |
-| 27 | metrics counter race | prometheus_client handles concurrency internally |
+| 5–13 | embedder pendura no cold start | `_log.exception`; LTM block vira vazio; request ainda forwarda |
+| 18–19 | 5xx/timeout do upstream | `with_retry` 3x exponential backoff; falha final retorna 5xx |
+| 18–19 | 4xx do upstream | retorna 4xx verbatim; nenhuma eviction |
+| 20–22 | pressao de selection (Pass 3) | `budget_pressure=True` logado; eviction parcial mantida |
+| 23–24 | violacao UNIQUE no hash do SQLite | path de dedup: retorna id existente |
+| 25 | fila de facet cheia | drop + counter facet_dropped_total |
+| 27 | race no counter de metricas | prometheus_client trata concorrencia internamente |

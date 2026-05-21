@@ -1,41 +1,41 @@
-# spillover — Architecture
+# spillover — Arquitetura
 
-Corporate-grade architecture documentation. Each file is one view; together they cover system context, runtime topology, hexagonal decomposition, end-to-end request flow, storage schema, and performance evidence.
+Documentacao tecnica nivel corporativo. Cada arquivo e uma vista diferente do sistema; juntos cobrem contexto, topologia em runtime, decomposicao hexagonal, fluxo end-to-end de request, schema de armazenamento, e evidencia de performance.
 
-All diagrams use [Mermaid](https://mermaid.js.org/) — renders natively in GitHub, Notion, Obsidian, GitLab, and Anthropic web. For PowerPoint/PDF: paste the mermaid block into [mermaid.live](https://mermaid.live) and export PNG/SVG.
+Diagramas em [Mermaid](https://mermaid.js.org/) — renderizam direto no GitHub, Notion, Obsidian, GitLab. Para PowerPoint/PDF: cole o bloco mermaid em [mermaid.live](https://mermaid.live) e exporte PNG/SVG.
 
-## Index
+## Indice
 
-| # | View | Purpose | Audience |
+| # | Vista | Proposito | Publico |
 |---|---|---|---|
-| [01](01-system-context.md) | System Context | spillover + external actors | Executive, BD |
-| [02](02-container.md) | Container | Runtime containers + per-project state | Architect |
-| [03](03-component-hexagonal.md) | Component (hexagonal) | Inbound / Application / Domain / Outbound layers | Engineer |
-| [04](04-sequence-hot-path.md) | Sequence (inbound request) | End-to-end request flow | Engineer |
-| [05](05-episode-lifecycle.md) | State machine | Episode states: Active → Evicted → Embedded → Decayed | Engineer |
-| [06](06-eviction-flow.md) | Data flow (eviction) | Token-balanced 1:1 overflow policy | Engineer |
-| [07](07-retrieval-fusion.md) | Data flow (retrieval) | 4-leg hybrid fusion (vector + graph + bm25 + causal) | Engineer |
-| [08](08-counter-compaction.md) | Counter-compaction defenses | Four-vector strategy | Engineer, Security |
-| [09](09-storage-schema.md) | ER diagram | Per-project SQLite + Kuzu schema | Engineer, DBA |
-| [10](10-performance-heavy.md) | Performance bars | Heavy-stress bench numbers | All |
-| [11](11-deployment.md) | Deployment topology | Workstation-local processes + cloud | Operator |
-| [12](12-token-economics.md) | Token sankey | Where the tokens go (steady state) | Architect, BD |
+| [01](01-system-context.md) | Contexto do Sistema | spillover + atores externos | Executivo, BD |
+| [02](02-container.md) | Containers | Containers de runtime + estado por projeto | Arquiteto |
+| [03](03-component-hexagonal.md) | Componentes (hexagonal) | Camadas Inbound / Aplicacao / Dominio / Outbound | Engenheiro |
+| [04](04-sequence-hot-path.md) | Sequencia (request inbound) | Fluxo end-to-end de uma chamada | Engenheiro |
+| [05](05-episode-lifecycle.md) | Maquina de estados | Estados do Episodio: Ativo → Evicted → Embedded → Decayed | Engenheiro |
+| [06](06-eviction-flow.md) | Data flow (eviction) | Politica overflow token-balanced 1:1 | Engenheiro |
+| [07](07-retrieval-fusion.md) | Data flow (retrieval) | Fusion hibrido 4-pernas (vector + graph + bm25 + causal) | Engenheiro |
+| [08](08-counter-compaction.md) | Defesas counter-compaction | Estrategia em 4 vetores | Engenheiro, Security |
+| [09](09-storage-schema.md) | ER diagram | Schema SQLite + Kuzu por projeto | Engenheiro, DBA |
+| [10](10-performance-heavy.md) | Performance | Numeros do bench heavy | Todos |
+| [11](11-deployment.md) | Topologia de deploy | Processos locais + cloud | Operador |
+| [12](12-token-economics.md) | Sankey de tokens | Onde os tokens vao em steady state | Arquiteto, BD |
 
-## Reading order
+## Ordem de leitura sugerida
 
-- **For a 5-minute overview**: 01 → 04 → 10
-- **For an architect deep-dive**: 02 → 03 → 06 → 07 → 09
-- **For an investor pitch**: 01 → 10 → 12
-- **For an operator runbook**: 11 → 02 → 09
+- **Overview de 5 min:** 01 → 04 → 10
+- **Deep-dive de arquiteto:** 02 → 03 → 06 → 07 → 09
+- **Pitch pra investidor:** 01 → 10 → 12
+- **Runbook de operador:** 11 → 02 → 09
 
-## Doc conventions
+## Convencoes dos diagramas
 
-- Mermaid C4 model: red boxes are external systems; blue are spillover-owned; green are persistent stores; purple are people.
-- "Hexagonal" follows Cockburn ports & adapters: domain at center, inbound adapters drive, outbound adapters serve.
-- Numbers from `docs/eval/heavy-stress-v1.6.0.md` (real Anthropic Haiku 4.5 run, 2026-05-21).
+- Mermaid C4 model: caixas vermelhas sao sistemas externos; azuis sao componentes do spillover; verdes sao stores persistentes; roxas sao pessoas.
+- "Hexagonal" segue Cockburn (ports & adapters): dominio no centro, inbound adapters dirigem, outbound adapters atendem.
+- Numeros vem de `docs/eval/heavy-stress-v1.6.0.md` (run real contra Anthropic Haiku 4.5 em 2026-05-21).
 
-## Related
+## Relacionados
 
-- [Design spec](../superpowers/specs/2026-05-20-spillover-design.md) — full original design.
-- [Plans](../superpowers/plans/) — 10 implementation plans Plans 1–10 + 8.1.
-- [Evaluation](../eval/) — published baselines v1.3.0 through v1.6.1.
+- [Spec de design original](../superpowers/specs/2026-05-20-spillover-design.md) — design completo do produto.
+- [Planos de implementacao](../superpowers/plans/) — Plans 1 a 10 + 8.1.
+- [Baselines de avaliacao](../eval/) — resultados publicados de v1.3.0 ate v1.6.1.

@@ -1,11 +1,11 @@
-# 09 — Storage schema (per-project)
+# 09 — Schema de armazenamento (por projeto)
 
-Each project gets its own SQLite + Kuzu pair under `~/.spillover/projects/<sha1(cwd)>/`.
+Cada projeto tem seu proprio par SQLite + Kuzu em `~/.spillover/projects/<sha1(cwd)>/`.
 
 ```mermaid
 erDiagram
-    episodes ||--o| vec_episodes : "1:1 (after facet)"
-    episodes ||--o| episodes_fts : "1:1 (FTS5 mirror)"
+    episodes ||--o| vec_episodes : "1:1 (apos facet)"
+    episodes ||--o| episodes_fts : "1:1 (espelho FTS5)"
     Episode_kuzu ||--o{ Entity : "MENTIONS"
     Episode_kuzu ||--o{ File : "TOUCHED"
     Episode_kuzu ||--o{ Decision : "IMPLEMENTS"
@@ -80,33 +80,33 @@ erDiagram
     }
 ```
 
-## SQLite tables
+## Tabelas SQLite
 
 ### `episodes`
 
-Source of truth for archived turn content. Raw, never summarised.
+Fonte da verdade pro conteudo dos turnos arquivados. Raw, nunca resumido.
 
-| column | type | notes |
+| coluna | tipo | notas |
 |---|---|---|
-| `id` | TEXT PK | UUID4 string |
-| `project_id` | TEXT | denormalised — also encoded in the file path |
+| `id` | TEXT PK | string UUID4 |
+| `project_id` | TEXT | denormalizado — tambem encoded no path do arquivo |
 | `role` | TEXT | `user` / `assistant` / `tool` |
-| `content_json` | TEXT | raw JSON of the original `content` field |
-| `tool_calls_json` | TEXT | structured tool calls if any |
-| `code_refs_json` | TEXT | extracted file/line/op references |
-| `token_count` | INTEGER | tokenizer estimate when archived |
+| `content_json` | TEXT | JSON raw do campo `content` original |
+| `tool_calls_json` | TEXT | tool calls estruturadas se houver |
+| `code_refs_json` | TEXT | referencias file/line/op extraidas |
+| `token_count` | INTEGER | estimativa do tokenizer no momento do archive |
 | `ts` | INTEGER | epoch ms |
-| `hash` | TEXT UNIQUE | sha256 over `role + content + tool_calls` for dedup |
-| `evicted` | INTEGER CHECK 0/1 | 1 once removed from active context |
-| `pinned` | INTEGER CHECK 0/1 | 1 → decay-exempt |
-| `hit_count` | INTEGER | incremented when retrieved + cited |
+| `hash` | TEXT UNIQUE | sha256 sobre `role + content + tool_calls` pra dedup |
+| `evicted` | INTEGER CHECK 0/1 | 1 quando removido do contexto ativo |
+| `pinned` | INTEGER CHECK 0/1 | 1 → exempt de decay |
+| `hit_count` | INTEGER | incrementa quando retrieved + citado |
 | `memory_type` | TEXT | 5-way: `priority`/`procedural`/`semantic`/`episodic`/`task` |
-| `facet_pending` | INTEGER CHECK 0/1 | 1 until facet worker processes |
-| `compaction_rescued` | INTEGER CHECK 0/1 | 1 if Vector-3 rescue created it |
+| `facet_pending` | INTEGER CHECK 0/1 | 1 ate o facet worker processar |
+| `compaction_rescued` | INTEGER CHECK 0/1 | 1 se rescue do Vector-3 criou ele |
 
-### `vec_episodes` (sqlite-vec virtual table)
+### `vec_episodes` (tabela virtual sqlite-vec)
 
-| column | type |
+| coluna | tipo |
 |---|---|
 | `episode_id` | TEXT PK FK→episodes.id |
 | `embedding` | FLOAT[768] |
@@ -116,29 +116,29 @@ Source of truth for archived turn content. Raw, never summarised.
 
 ### `episodes_fts` (SQLite FTS5)
 
-| column | notes |
+| coluna | notas |
 |---|---|
-| `episode_id` | UNINDEXED — pointer to episodes.id |
-| `body` | full text indexed; `tokenize=unicode61 tokenchars './-_:'` preserves compound tokens like `0.85`, `char/4`, `middleware.py:42`, `letsencryptresolver` |
+| `episode_id` | UNINDEXED — pointer pra episodes.id |
+| `body` | texto inteiro indexado; `tokenize=unicode61 tokenchars './-_:'` preserva tokens compostos tipo `0.85`, `char/4`, `middleware.py:42`, `letsencryptresolver` |
 
 ### `seen_turns`
 
-Counter-compaction memory: every assistant turn the proxy has witnessed.
+Memoria de counter-compaction: todo turno assistente que o proxy ja viu.
 
-| column | type | notes |
+| coluna | tipo | notas |
 |---|---|---|
 | `project_id` | TEXT PK | |
-| `turn_hash` | TEXT PK | sha256 of normalised message |
-| `turn_index` | INTEGER | position when first seen |
-| `content_json` | TEXT | full raw message |
+| `turn_hash` | TEXT PK | sha256 da mensagem normalizada |
+| `turn_index` | INTEGER | posicao quando visto pela primeira vez |
+| `content_json` | TEXT | mensagem raw inteira |
 | `first_seen_ts` | INTEGER | |
-| `last_seen_ts` | INTEGER | updated on every subsequent appearance; drives prune TTL |
+| `last_seen_ts` | INTEGER | atualizado em toda aparicao subsequente; driva TTL do prune |
 
-## Kuzu graph (per-project)
+## Grafo Kuzu (por projeto)
 
-### Node tables
+### Tabelas de node
 
-| node | properties |
+| node | propriedades |
 |---|---|
 | `Episode` | `id STRING PK, ts INT64, memory_type STRING, importance DOUBLE` |
 | `Entity` | `name STRING PK, kind STRING ("file"/"url"/"identifier"/"command")` |
@@ -146,36 +146,36 @@ Counter-compaction memory: every assistant turn the proxy has witnessed.
 | `Decision` | `hash STRING PK, summary STRING` |
 | `Command` | `sig STRING PK, first_seen_ts INT64` |
 
-### Relation tables
+### Tabelas de relacao
 
-| edge | from → to | meaning |
+| edge | de → pra | significado |
 |---|---|---|
-| `MENTIONS` | Episode → Entity | episode text references this entity |
-| `TOUCHED` | Episode → File | episode performed file op (read/write/edit) |
-| `IMPLEMENTS` | Episode → Decision | episode captures or executes a decision |
-| `RAN` | Episode → Command | episode ran a bash/powershell command |
-| `AFTER` | Episode → Episode | temporal chain — used by causality_chain leg |
+| `MENTIONS` | Episode → Entity | texto do episodio referencia essa entidade |
+| `TOUCHED` | Episode → File | episodio fez op no arquivo (read/write/edit) |
+| `IMPLEMENTS` | Episode → Decision | episodio captura ou executa uma decisao |
+| `RAN` | Episode → Command | episodio rodou um comando bash/powershell |
+| `AFTER` | Episode → Episode | cadeia temporal — usado pela perna causality_chain |
 
-## Indexes
+## Indices
 
-| table | index | purpose |
+| tabela | indice | proposito |
 |---|---|---|
-| `episodes` | `UNIQUE(hash)` | sha256 dedup |
+| `episodes` | `UNIQUE(hash)` | dedup sha256 |
 | `episodes` | `INDEX(evicted, ts)` | retrieval — fetch evicted-and-recent |
-| `episodes` | `INDEX(facet_pending)` | facet worker polling |
+| `episodes` | `INDEX(facet_pending)` | polling do facet worker |
 | `episodes_fts` | FTS5 implicit | BM25 lexical |
 | `vec_episodes` | sqlite-vec implicit | cosine MATCH |
-| Kuzu | PK on every node table | graph lookups |
+| Kuzu | PK em toda node table | lookups de grafo |
 
-## DB growth
+## Crescimento do DB
 
-Heavy bench (400 turns, 4 archives):
+Heavy bench (400 turnos, 4 archives):
 
 ```
 ~/.spillover/projects/<pid>/episodes.db   3.3 MB
-~/.spillover/projects/<pid>/kuzu/         ~12 KB (small graph)
+~/.spillover/projects/<pid>/kuzu/         ~12 KB (grafo pequeno)
 ```
 
-Linear in archived episodes. At ~825 KB per archived episode at this density (mostly the raw content_json + embedding blob), 1000 episodes ≈ 800 MB. Real usage with shorter typical turns lands closer to ~100 KB per archive → ~100 MB per 1000 episodes.
+Linear no contador de episodios arquivados. Com ~825 KB por episodio nessa densidade (principalmente o content_json raw + blob do embedding), 1000 episodios ≈ 800 MB. Uso real com turnos tipicos mais curtos da mais perto de ~100 KB por archive → ~100 MB por 1000 episodios.
 
-`SPILLOVER_RETENTION_DAYS` (planned) + decay scheduler will prune cold rows. Today: no automatic deletion; old episodes simply decay to low importance.
+`SPILLOVER_RETENTION_DAYS` (planejado) + decay scheduler vao fazer prune de linhas frias. Hoje: sem delecao automatica; episodios velhos soh decaem pra importance baixa.

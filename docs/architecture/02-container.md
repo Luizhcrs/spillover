@@ -1,6 +1,6 @@
-# 02 — Container (C4 Level 2)
+# 02 — Containers (C4 Nivel 2)
 
-Inside the spillover system boundary: four runtime containers + three persistent stores.
+Dentro do limite do sistema spillover: 4 containers de runtime + 3 stores persistentes.
 
 ```mermaid
 graph TB
@@ -9,65 +9,65 @@ graph TB
     classDef store fill:#2e7d32,stroke:#fff,color:#fff
     classDef person fill:#08427b,stroke:#fff,color:#fff
 
-    user[Developer CLI]:::person
+    user[CLI do dev]:::person
 
-    subgraph spillover_system["spillover boundary"]
+    subgraph spillover_system["limite do sistema spillover"]
         wrapper["Wrapper<br/>spillover-cc /<br/>spillover-codex /<br/>spillover-cursor /<br/>spillover-continue<br/><br/>Click + subprocess"]:::container
-        proxy["Proxy Daemon<br/>:8787<br/><br/>FastAPI + asyncio<br/>+ uvicorn"]:::container
+        proxy["Daemon do Proxy<br/>:8787<br/><br/>FastAPI + asyncio<br/>+ uvicorn"]:::container
         worker["Facet Worker<br/>asyncio.Queue<br/>maxsize=1024<br/><br/>run_in_executor"]:::container
         decay["Decay Scheduler<br/>cron 6h<br/><br/>asyncio task"]:::container
 
-        sqlite[("SQLite<br/>per-project<br/>~/.spillover/projects/&lt;pid&gt;/<br/>episodes.db<br/><br/>tables: episodes,<br/>seen_turns,<br/>vec_episodes,<br/>episodes_fts")]:::store
-        kuzu[("Kuzu<br/>per-project<br/>~/.spillover/projects/&lt;pid&gt;/kuzu/<br/><br/>5 node tables +<br/>5 relation tables")]:::store
-        fastembed[("fastembed cache<br/>~/.cache/fastembed/<br/>nomic-embed-text-v1.5-Q<br/>~130MB ONNX")]:::store
+        sqlite[("SQLite<br/>por projeto<br/>~/.spillover/projects/&lt;pid&gt;/<br/>episodes.db<br/><br/>tabelas: episodes,<br/>seen_turns,<br/>vec_episodes,<br/>episodes_fts")]:::store
+        kuzu[("Kuzu<br/>por projeto<br/>~/.spillover/projects/&lt;pid&gt;/kuzu/<br/><br/>5 node tables +<br/>5 relation tables")]:::store
+        fastembed[("cache fastembed<br/>~/.cache/fastembed/<br/>nomic-embed-text-v1.5-Q<br/>~130MB ONNX")]:::store
     end
 
     anthropic[Anthropic API]:::external
     openai[OpenAI API]:::external
 
-    user -->|spawns| wrapper
-    wrapper -->|"sets ANTHROPIC_BASE_URL,<br/>OPENAI_BASE_URL,<br/>SPILLOVER_PROJECT_ID,<br/>disable env vars"| proxy
+    user -->|spawna| wrapper
+    wrapper -->|"seta ANTHROPIC_BASE_URL,<br/>OPENAI_BASE_URL,<br/>SPILLOVER_PROJECT_ID,<br/>env vars de disable"| proxy
 
     proxy -->|"intercept,<br/>retrieve,<br/>archive,<br/>rewrite"| sqlite
-    proxy -->|"open project DB,<br/>graph walk,<br/>causal chain"| kuzu
-    proxy -->|"enqueue FacetEvent"| worker
+    proxy -->|"abre DB do projeto,<br/>graph walk,<br/>causal chain"| kuzu
+    proxy -->|"enfileira FacetEvent"| worker
     worker -->|"INSERT vec_episodes,<br/>MERGE Kuzu nodes/edges"| sqlite
     worker --> kuzu
     worker -->|"embed_text"| fastembed
     decay -->|"UPDATE importance,<br/>prune seen_turns"| sqlite
     decay --> kuzu
 
-    proxy -->|"httpx POST<br/>with retry 3x backoff"| anthropic
+    proxy -->|"httpx POST<br/>com retry 3x backoff"| anthropic
     proxy --> openai
 ```
 
-## Runtime containers
+## Containers de runtime
 
-| container | tech | lifetime | purpose |
+| container | tech | tempo de vida | proposito |
 |---|---|---|---|
-| Wrapper | Click + subprocess | short — terminates with target CLI | sets env vars, spawns CLI |
-| Proxy Daemon | FastAPI + asyncio + uvicorn | long — single process per machine | HTTP routes for all forwarded traffic + ad-hoc query |
-| Facet Worker | asyncio.Queue consumer | lifetime of proxy | async ingestion of evicted episodes into embeddings + graph |
-| Decay Scheduler | asyncio cron task | lifetime of proxy | every 6h adjust importance + prune stale seen_turns |
+| Wrapper | Click + subprocess | curto — termina junto com o CLI alvo | seta env vars, lanca CLI |
+| Daemon do Proxy | FastAPI + asyncio + uvicorn | longo — 1 processo por maquina | rotas HTTP pra todo trafego forwarded + query ad-hoc |
+| Facet Worker | consumidor de asyncio.Queue | vida do proxy | ingestao async dos episodios evicted em embeddings + graph |
+| Decay Scheduler | task cron asyncio | vida do proxy | a cada 6h ajusta importance + faz prune de seen_turns velhos |
 
-## Persistent stores
+## Stores persistentes
 
-| store | tech | location | scope |
+| store | tech | localizacao | escopo |
 |---|---|---|---|
-| SQLite | stdlib sqlite3 + sqlite-vec + FTS5 | `~/.spillover/projects/<pid>/episodes.db` | one file per project |
-| Kuzu | embedded graph DB | `~/.spillover/projects/<pid>/kuzu/` | one DB per project, cached LRU 32 |
-| fastembed cache | ONNX model | `~/.cache/fastembed/` | shared across all projects on this machine |
+| SQLite | sqlite3 stdlib + sqlite-vec + FTS5 | `~/.spillover/projects/<pid>/episodes.db` | um arquivo por projeto |
+| Kuzu | DB de grafo embedded | `~/.spillover/projects/<pid>/kuzu/` | um DB por projeto, cache LRU 32 |
+| cache fastembed | modelo ONNX | `~/.cache/fastembed/` | compartilhado entre todos os projetos da maquina |
 
-## Key flows
+## Fluxos principais
 
-- **Inbound request**: Wrapper → Proxy → SQLite + Kuzu (read) → Anthropic/OpenAI → SQLite (write evicted) → FacetWorker queue.
-- **Async facet pipeline**: FacetWorker pop → fastembed + classify + extract → SQLite (vec_episodes + fts) + Kuzu (nodes/edges).
-- **Decay sweep**: Scheduler ticks → walks vec_episodes per project → UPDATE importance, prune stale seen_turns.
+- **Request inbound**: Wrapper → Proxy → SQLite + Kuzu (leitura) → Anthropic/OpenAI → SQLite (escrita do evicted) → fila do FacetWorker.
+- **Pipeline async de facet**: FacetWorker pop → fastembed + classify + extract → SQLite (vec_episodes + fts) + Kuzu (nodes/edges).
+- **Sweep do decay**: Scheduler tick → percorre vec_episodes por projeto → UPDATE importance, prune seen_turns velhos.
 
-## Process model
+## Modelo de processo
 
-Single `spillover up` process hosts proxy + facet worker + decay scheduler in one asyncio event loop. CPU-bound work (fastembed inference, SQLite writes during eviction) goes through `loop.run_in_executor` so the hot path stays non-blocking.
+Um unico processo `spillover up` hospeda proxy + facet worker + decay scheduler no mesmo event loop asyncio. Trabalho CPU-bound (inferencia fastembed, escritas SQLite durante eviction) passa por `loop.run_in_executor` pra o hot path nao bloquear.
 
-## Scaling boundary
+## Fronteira de escala
 
-Spillover is **single-machine, single-process** by design. For multi-tenant SaaS deployment, the schema already carries `project_id` (denormalised in `episodes`), but the file-per-project DB layout would need consolidation into a tenant-scoped DB. See [Plan 10 follow-ups](../superpowers/plans/2026-05-21-spillover-plan10-vision-complete.md) for the path.
+spillover e **single-machine, single-process** por design. Pra deploy multi-tenant SaaS, o schema ja carrega `project_id` (denormalizado em `episodes`), mas o layout de arquivo-por-projeto precisaria consolidar num DB escopado por tenant. Ver [follow-ups do Plan 10](../superpowers/plans/2026-05-21-spillover-plan10-vision-complete.md) pro caminho.
