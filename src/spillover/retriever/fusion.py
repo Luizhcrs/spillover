@@ -3,6 +3,7 @@ from __future__ import annotations
 from spillover.retriever.vector import Hit
 
 DEFAULT_TYPE_WEIGHTS = {
+    "task": 1.4,
     "priority": 1.5,
     "procedural": 1.2,
     "episodic": 1.0,

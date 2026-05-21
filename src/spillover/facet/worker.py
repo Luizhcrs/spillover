@@ -30,11 +30,12 @@ def _floats_to_bytes(v: list[float]) -> bytes:
 
 def _base_importance(memory_type: str, tool_call_count: int) -> float:
     base = {
+        "task": 0.95,
         "priority": 1.0,
         "procedural": 0.7,
         "semantic": 0.6,
         "episodic": 0.5,
-    }[memory_type]
+    }.get(memory_type, 0.5)
     return min(1.0, base + 0.05 * tool_call_count)
 
 
