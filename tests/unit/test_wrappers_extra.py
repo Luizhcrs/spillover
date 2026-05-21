@@ -31,18 +31,21 @@ def _run(main, module_name: str, monkeypatch, tmp_path):
 
 def test_codex_wrapper_env(monkeypatch, tmp_path):
     cap = _run(codex_main, "spillover.wrappers.codex", monkeypatch, tmp_path)
-    assert cap["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999"
-    assert cap["env"]["OPENAI_BASE_URL"] == "http://127.0.0.1:9999"
+    # URL now includes /p/<project_id> for path-based routing
+    assert cap["env"]["ANTHROPIC_BASE_URL"].startswith("http://127.0.0.1:9999/p/")
+    assert cap["env"]["OPENAI_BASE_URL"].startswith("http://127.0.0.1:9999/p/")
     assert cap["env"]["SPILLOVER_PROJECT_ID"] == "p-test"
 
 
 def test_cursor_wrapper_env(monkeypatch, tmp_path):
     cap = _run(cursor_main, "spillover.wrappers.cursor", monkeypatch, tmp_path)
     assert "ANTHROPIC_BASE_URL" in cap["env"]
+    assert cap["env"]["ANTHROPIC_BASE_URL"].startswith("http://127.0.0.1:9999/p/")
     assert cap["env"]["SPILLOVER_PROJECT_ID"] == "p-test"
 
 
 def test_continue_wrapper_env(monkeypatch, tmp_path):
     cap = _run(continue_main, "spillover.wrappers.continue_dev", monkeypatch, tmp_path)
     assert "ANTHROPIC_BASE_URL" in cap["env"]
+    assert cap["env"]["ANTHROPIC_BASE_URL"].startswith("http://127.0.0.1:9999/p/")
     assert cap["env"]["SPILLOVER_PROJECT_ID"] == "p-test"

@@ -32,7 +32,7 @@ def main(ctx, proxy: str | None, project: str | None):
     cwd = Path.cwd().resolve()
     project_id = project or hashlib.sha1(str(cwd).encode("utf-8")).hexdigest()
 
-    proxy_url = proxy or f"http://127.0.0.1:{config.port}"
+    proxy_url = proxy or f"http://127.0.0.1:{config.port}/p/{project_id}"
 
     env = os.environ.copy()
     env["ANTHROPIC_BASE_URL"] = proxy_url

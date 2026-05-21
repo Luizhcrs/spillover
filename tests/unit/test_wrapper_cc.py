@@ -27,7 +27,8 @@ def test_wrapper_passes_proxy_url(tmp_path, monkeypatch):
             result = runner.invoke(main, ["--project", "proj-test", "--help-claude-code"])
 
     assert "ANTHROPIC_BASE_URL" in captured["env"]
-    assert captured["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999"
+    # URL now includes /p/<project_id> for path-based routing
+    assert captured["env"]["ANTHROPIC_BASE_URL"].startswith("http://127.0.0.1:9999/p/")
     assert captured["env"]["CLAUDE_CODE_AUTO_COMPACT"] == "0"
     assert captured["env"]["SPILLOVER_PROJECT_ID"] == "proj-test"
     assert result.exit_code == 0

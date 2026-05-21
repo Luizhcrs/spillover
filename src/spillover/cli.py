@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
 
 import click
@@ -8,6 +10,15 @@ import uvicorn
 from spillover.config import Config
 from spillover.proxy.app import create_app
 from spillover.storage.sqlite import open_project_db, project_db_path
+
+_HEX_ID = re.compile(r"^[0-9a-f]{6,64}$")
+
+
+def _resolve_pid(raw: str) -> str:
+    """Mirror ProjectIdMiddleware: pass hex IDs through; sha1-hash everything else."""
+    if _HEX_ID.match(raw):
+        return raw
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 @click.group()
@@ -31,6 +42,7 @@ def up(port: int | None, host: str):
 @click.argument("project_id")
 def stats(project_id: str):
     """Show episode statistics for a project."""
+    project_id = _resolve_pid(project_id)
     config = Config.from_env()
     path = project_db_path(config.db_root, project_id)
     if not path.exists():
@@ -64,6 +76,7 @@ def stats(project_id: str):
 @click.option("--topk", default=None, type=int)
 def query(project_id: str, text: str, topk: int | None):
     """Run the hybrid retriever ad-hoc against a project and print ranked hits."""
+    project_id = _resolve_pid(project_id)
     from spillover.facet.embed import embed_text
     from spillover.facet.entities import extract_entities
     from spillover.retriever.fusion import rrf_fuse
@@ -100,23 +113,76 @@ def query(project_id: str, text: str, topk: int | None):
 
 
 @main.command()
+@click.option("--tasks", type=click.Path(exists=True, dir_okay=False), required=True)
 @click.option("--report", type=click.Path(dir_okay=False), default="bench-report.md")
-@click.option("--tasks", type=click.Path(exists=True, dir_okay=False), required=False)
-def bench(report: str, tasks: str | None):
-    """Run the offline A/B benchmark harness and write a markdown report."""
-    import json
+@click.option(
+    "--run", is_flag=True, default=False,
+    help="Run benchmark against Anthropic (requires ANTHROPIC_API_KEY or OAuth)",
+)
+@click.option("--proxy-url", default="http://127.0.0.1:8787")
+@click.option("--vanilla-url", default="https://api.anthropic.com")
+@click.option(
+    "--project", default=None,
+    help="Override project_id for spillover runs (default: random per session)",
+)
+@click.option("--model", default="claude-haiku-4-5-20251001")
+def bench(tasks: str, report: str, run: bool, proxy_url: str, vanilla_url: str,
+          project: str | None, model: str):
+    """Run the offline A/B harness OR render a markdown report from a scoring file."""
+    from dataclasses import asdict
 
-    from spillover.bench.ab import RunResult, render_markdown, summarize_runs
+    from spillover.bench.runner import (
+        main_offline_demo,
+        render_ab_report,
+        run_ab,
+    )
 
-    if not tasks:
-        click.echo("No --tasks file provided; nothing to run.")
+    tasks_path = Path(tasks)
+    report_path = Path(report)
+
+    if not run:
+        main_offline_demo(tasks_path, report_path)
+        click.echo(f"wrote {report_path}")
         return
 
-    raw = json.loads(Path(tasks).read_text(encoding="utf-8"))
-    runs = [RunResult(**r) for r in raw]
-    md = render_markdown(summarize_runs(runs))
-    Path(report).write_text(md, encoding="utf-8")
-    click.echo(f"wrote {report}")
+    # Live mode: resolve auth
+    import json
+    import os
+    import uuid
+
+    auth = os.environ.get("ANTHROPIC_API_KEY")
+    if auth and not auth.startswith("Bearer "):
+        auth = f"Bearer {auth}"
+    if not auth:
+        cred_path = Path.home() / ".claude" / ".credentials.json"
+        if cred_path.exists():
+            data = json.loads(cred_path.read_text(encoding="utf-8"))
+            tok = data.get("claudeAiOauth", {}).get("accessToken")
+            if tok:
+                auth = f"Bearer {tok}"
+    if not auth:
+        click.echo(
+            "No auth available. Set ANTHROPIC_API_KEY or run `claude` once to populate OAuth.",
+            err=True,
+        )
+        raise SystemExit(2)
+
+    pid = project or hashlib.sha1(uuid.uuid4().bytes).hexdigest()
+    proxy_with_proj = f"{proxy_url.rstrip('/')}/p/{pid}"
+
+    click.echo(f"Running A/B against {len(open(tasks_path).readlines())} tasks")
+    click.echo(f"  vanilla url: {vanilla_url}")
+    click.echo(f"  spillover url: {proxy_with_proj}")
+    click.echo(f"  project: {pid}")
+    results = run_ab(tasks_path, auth, proxy_with_proj, vanilla_base_url=vanilla_url, model=model)
+    report_path.write_text(render_ab_report(results), encoding="utf-8")
+
+    # Also dump raw results for re-rendering
+    raw_path = report_path.with_suffix(".jsonl")
+    with raw_path.open("w", encoding="utf-8") as f:
+        for r in results:
+            f.write(json.dumps(asdict(r)) + "\n")
+    click.echo(f"wrote {report_path} and {raw_path}")
 
 
 if __name__ == "__main__":
