@@ -377,6 +377,15 @@ def create_app(config: Config) -> FastAPI:
             should_intercept_request,
         )
         from spillover.counter_compact.usage_rewrite import rewrite_response_json
+        from spillover.metrics.registry import (
+            compaction_detected_total,
+            episodes_archived_total,
+            facet_queue_depth,
+            overflow_triggered_total,
+            request_duration,
+            requests_total,
+            retriever_hits_total,
+        )
 
         # Intercept only applies to Anthropic wire format (compact signal)
         if provider == "anthropic" and should_intercept_request(payload):
@@ -388,7 +397,14 @@ def create_app(config: Config) -> FastAPI:
         # Retrieval pass: inject LTM into the payload before forwarding.
         try:
             conv = adapter.parse(payload)
-            ltm_text = await _run_sync(loop, _retrieve_ltm_block, config, project_id, conv)
+            with request_duration.labels(phase="retrieve").time():
+                ltm_text = await _run_sync(
+                    loop, _retrieve_ltm_block, config, project_id, conv
+                )
+            if ltm_text:
+                retriever_hits_total.labels(
+                    project=project_id, source="hybrid"
+                ).inc()
             adapter.inject_ltm(payload, ltm_text)
         except Exception:
             log.exception(
@@ -398,11 +414,19 @@ def create_app(config: Config) -> FastAPI:
         # Detect compaction + rescue (Anthropic only), offloaded to executor
         rescue_ids: list[str] = []
         if provider == "anthropic":
-            _, rescue_ids = await _run_sync(
+            rescued_list, rescue_ids = await _run_sync(
                 loop, _detect_and_rescue, config, project_id, payload.get("messages") or []
             )
+            if rescued_list:
+                compaction_detected_total.labels(project=project_id).inc(
+                    len(rescued_list)
+                )
             if rescue_ids:
+                episodes_archived_total.labels(
+                    project=project_id, type="rescued"
+                ).inc(len(rescue_ids))
                 _enqueue_facets(app, project_id, rescue_ids, config)
+                facet_queue_depth.set(app.state.facet_queue.qsize())
 
         forwarded_body = json.dumps(payload).encode("utf-8")
         fwd_headers = {
@@ -413,9 +437,10 @@ def create_app(config: Config) -> FastAPI:
         is_stream = bool(payload.get("stream"))
 
         if not is_stream:
-            r = await app.state.http_client.post(
-                upstream_url, headers=fwd_headers, content=forwarded_body
-            )
+            with request_duration.labels(phase="upstream").time():
+                r = await app.state.http_client.post(
+                    upstream_url, headers=fwd_headers, content=forwarded_body
+                )
             resp_bytes = r.content
             archived_ids: list[str] = []
             tokens_archived = 0
@@ -445,7 +470,17 @@ def create_app(config: Config) -> FastAPI:
                     project_id,
                 )
             if archived_ids:
+                overflow_triggered_total.labels(project=project_id).inc()
+                episodes_archived_total.labels(
+                    project=project_id, type="evicted"
+                ).inc(len(archived_ids))
                 _enqueue_facets(app, project_id, archived_ids, config)
+                facet_queue_depth.set(app.state.facet_queue.qsize())
+            requests_total.labels(
+                project=project_id,
+                provider=provider,
+                status=str(r.status_code),
+            ).inc()
             return JSONResponse(
                 content=json.loads(resp_bytes),
                 status_code=r.status_code,
@@ -499,7 +534,17 @@ def create_app(config: Config) -> FastAPI:
                         project_id,
                     )
                 if archived_ids_s:
+                    overflow_triggered_total.labels(project=project_id).inc()
+                    episodes_archived_total.labels(
+                        project=project_id, type="evicted"
+                    ).inc(len(archived_ids_s))
                     _enqueue_facets(app, project_id, archived_ids_s, config)
+                    facet_queue_depth.set(app.state.facet_queue.qsize())
+                requests_total.labels(
+                    project=project_id,
+                    provider=provider,
+                    status=str(upstream.status_code),
+                ).inc()
 
         return StreamingResponse(
             proxy_stream(),

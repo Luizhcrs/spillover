@@ -12,10 +12,12 @@ def make_client(config):
 
 @respx.mock
 def test_content_chunks_pass_through_unbuffered(config):
+    delta_chunk = b'{"type":"content_block_delta","delta":{"text":"ok"}}'
+    stop_chunk = b'{"type":"message_stop","usage":{"input_tokens":900,"output_tokens":50}}'
     sse = (
         b'event: message_start\ndata: {"type":"message_start"}\n\n'
-        b'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"text":"ok"}}\n\n'
-        b'event: message_stop\ndata: {"type":"message_stop","usage":{"input_tokens":900,"output_tokens":50}}\n\n'
+        + b"event: content_block_delta\ndata: " + delta_chunk + b"\n\n"
+        + b"event: message_stop\ndata: " + stop_chunk + b"\n\n"
     )
     respx.post("https://api.anthropic.com/v1/messages").mock(
         return_value=httpx.Response(

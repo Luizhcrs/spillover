@@ -150,9 +150,12 @@ class FacetWorker:
         self._task: asyncio.Task | None = None
 
     async def _run(self) -> None:
+        from spillover.metrics.registry import facet_queue_depth
+
         loop = asyncio.get_running_loop()
         while True:
             event = await self.queue.get()
+            facet_queue_depth.set(self.queue.qsize())
             try:
                 await loop.run_in_executor(None, _process_one, event)
             except Exception:
