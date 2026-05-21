@@ -13,6 +13,10 @@ def test_config_defaults(monkeypatch):
     assert cfg.window_max == 200_000
     assert cfg.upstream_base_url == "https://api.anthropic.com"
     assert str(cfg.db_root).endswith(".spillover")
+    assert cfg.ltm_budget_pct == 0.15
+    assert cfg.retriever_topk == 8
+    assert cfg.retriever_vector_k == 50
+    assert cfg.retriever_graph_k == 50
 
 def test_config_env_overrides(monkeypatch):
     monkeypatch.setenv("SPILLOVER_PORT", "9000")
