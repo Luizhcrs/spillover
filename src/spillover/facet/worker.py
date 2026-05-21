@@ -101,6 +101,19 @@ def _process_one(event: FacetEvent) -> None:
             "imp": importance,
         },
     )
+    # Link this episode to the previous one in temporal order (if any)
+    prev = kuzu_conn.execute(
+        "MATCH (e:Episode) WHERE e.ts < $ts "
+        "RETURN e.id, e.ts ORDER BY e.ts DESC LIMIT 1",
+        {"ts": ts},
+    )
+    if prev.has_next():
+        prev_id, _ = prev.get_next()
+        kuzu_conn.execute(
+            "MATCH (a:Episode {id: $a}), (b:Episode {id: $b}) "
+            "MERGE (a)-[:AFTER]->(b)",
+            {"a": prev_id, "b": event.episode_id},
+        )
     for ent in extract_entities(content):
         kuzu_conn.execute(
             "MERGE (n:Entity {name: $name}) SET n.kind = $kind",
