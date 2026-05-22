@@ -62,11 +62,9 @@ class Config:
             profile_default=os.environ.get("SPILLOVER_PROFILE_DEFAULT", "auto"),
             fallback_model_anthropic=os.environ.get(
                 "SPILLOVER_FALLBACK_MODEL_ANTHROPIC",
-                os.environ.get(
-                    "SPILLOVER_FALLBACK_MODEL", "claude-haiku-4-5-20251001"
-                ),
+                os.environ.get("SPILLOVER_FALLBACK_MODEL", ""),
             ),
             fallback_model_openai=os.environ.get(
-                "SPILLOVER_FALLBACK_MODEL_OPENAI", "gpt-4o-mini"
+                "SPILLOVER_FALLBACK_MODEL_OPENAI", ""
             ),
         )

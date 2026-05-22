@@ -1,0 +1,19 @@
+{
+  "name": "spillover",
+  "version": "0.1.0",
+  "description": "Transparent overflow-memory proxy for Claude Code. Archive turns instead of compacting them, inject relevant past episodes via hybrid retrieval (vector + graph + BM25 + causal), defend against client-side compaction.",
+  "author": {
+    "name": "Luiz Henrique Cavalcanti Ramos da Silva",
+    "email": "luizhcrs@gmail.com"
+  },
+  "repository": "https://github.com/Luizhcrs/spillover",
+  "license": "Apache-2.0",
+  "keywords": [
+    "memory",
+    "context",
+    "overflow",
+    "rag",
+    "retrieval",
+    "compaction"
+  ]
+}
