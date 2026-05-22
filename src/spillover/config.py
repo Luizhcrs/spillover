@@ -38,7 +38,7 @@ class Config:
     @classmethod
     def from_env(cls) -> Config:
         ceiling = int(os.environ.get("SPILLOVER_OPERATIONAL_CEILING_TOKENS",
-                                     os.environ.get("SPILLOVER_WINDOW_MAX", "200000")))
+                                     os.environ.get("SPILLOVER_WINDOW_MAX", "150000")))
         provider = int(os.environ.get("SPILLOVER_PROVIDER_MAX_TOKENS", str(ceiling * 2)))
         ltm = float(os.environ.get("SPILLOVER_LTM_BUDGET_PCT", "0.15"))
         return cls(

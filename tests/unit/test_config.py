@@ -13,10 +13,10 @@ def test_config_defaults(monkeypatch):
     cfg = Config.from_env()
     assert cfg.port == 8787
     assert cfg.watermark == 0.85
-    assert cfg.window_max == 200_000
-    assert cfg.operational_ceiling_tokens == 200_000
-    assert cfg.provider_max_tokens == 400_000
-    assert cfg.window_max == 200_000  # alias
+    assert cfg.window_max == 150_000
+    assert cfg.operational_ceiling_tokens == 150_000
+    assert cfg.provider_max_tokens == 300_000
+    assert cfg.window_max == 150_000  # alias
     assert cfg.upstream_base_url == "https://api.anthropic.com"
     assert cfg.openai_base_url == "https://api.openai.com"
     assert str(cfg.db_root).endswith(".spillover")

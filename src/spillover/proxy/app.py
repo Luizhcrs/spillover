@@ -286,6 +286,123 @@ def _inject_ltm(payload: dict, ltm_text: str) -> None:
     )
 
 
+def _evict_inbound_to_ceiling(
+    config: Config,
+    project_id: str,
+    payload: dict,
+    adapter: Adapter,
+) -> tuple[int, int]:
+    """Trim payload BEFORE forwarding so size stays <= operational_ceiling_tokens.
+
+    Operates only on Anthropic-shape messages (role/content list). Removes
+    oldest non-recent middle turns until the payload's total token estimate
+    is under the ceiling. Archives every removed turn into the project store
+    so retrieval can recall them later. Returns (turns_removed, tokens_freed).
+
+    System block + first 2 turns (anchor) + last `recent_buffer` turns are
+    preserved. If even after maximum trimming the payload is still too big,
+    we stop and let the upstream complain -- never drop the anchor or recent
+    context to "make it fit".
+    """
+    messages = payload.get("messages") or []
+    if not messages:
+        return 0, 0
+
+    system = payload.get("system")
+    system_tokens = count_tokens(system) if system else 0
+    turn_tokens = [count_tokens(m.get("content")) for m in messages]
+    total = system_tokens + sum(turn_tokens)
+    ceiling = config.operational_ceiling_tokens
+    if total <= ceiling:
+        return 0, 0
+
+    recent_buffer = 4
+    anchor = 2
+    if len(messages) <= anchor + recent_buffer:
+        return 0, 0
+
+    def _is_safely_evictable(msg: dict) -> bool:
+        """Skip turns that participate in tool_use/tool_result pairing.
+        Dropping one half of a pair makes Anthropic return 400 invalid_request."""
+        content = msg.get("content")
+        if isinstance(content, str):
+            return True
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") in ("tool_use", "tool_result"):
+                    return False
+            return True
+        return False
+
+    # Candidate indexes = middle (after anchor, before tail buffer), skip
+    # tool-coupled turns so we never break Anthropic's pairing invariant.
+    candidate_idxs = [
+        i for i in range(anchor, len(messages) - recent_buffer)
+        if _is_safely_evictable(messages[i])
+    ]
+    if not candidate_idxs:
+        return 0, 0
+
+    # Walk middle oldest-first, drop until under ceiling
+    db = open_project_db(config.db_root, project_id)
+    archived_ids: list[str] = []
+    tokens_freed = 0
+    try:
+        from spillover.archive.writer import Turn, archive_raw
+        ts = int(time.time() * 1000)
+        keep_mask = [True] * len(messages)
+        running = total
+        for idx in candidate_idxs:
+            if running <= ceiling:
+                break
+            msg = messages[idx]
+            tok = turn_tokens[idx]
+            if tok <= 0:
+                continue
+            try:
+                eid = archive_raw(
+                    db,
+                    Turn(
+                        project_id=project_id,
+                        role=msg.get("role", "user"),
+                        content=msg.get("content"),
+                        token_count=tok,
+                        ts=ts,
+                        source_index=idx,
+                        memory_type=None,
+                    ),
+                )
+                archived_ids.append(eid)
+                tokens_freed += tok
+                keep_mask[idx] = False
+                running -= tok
+            except Exception:
+                _log.exception(
+                    "pre-forward archive failed project=%s idx=%d", project_id, idx
+                )
+                break
+        db.commit()
+    finally:
+        db.close()
+
+    if not archived_ids:
+        return 0, 0
+
+    payload["messages"] = [m for m, keep in zip(messages, keep_mask) if keep]
+    if archived_ids:
+        from spillover.metrics.registry import (
+            episodes_archived_total,
+            overflow_triggered_total,
+        )
+        overflow_triggered_total.labels(project=project_id).inc()
+        episodes_archived_total.labels(
+            project=project_id, type="pre_forward"
+        ).inc(len(archived_ids))
+    return len(archived_ids), tokens_freed
+
+
 def _maybe_evict(
     config: Config,
     project_id: str,
@@ -584,6 +701,23 @@ def create_app(config: Config) -> FastAPI:
                         db.close()
                 except Exception:
                     log.exception("passive seen_turns record failed project=%s", project_id)
+
+        # Pre-forward eviction: keep outbound payload <= operational ceiling.
+        # Spillover should be size-NEUTRAL with respect to the upstream:
+        # Anthropic must never see a payload larger than what raw Claude Code
+        # would have generated. Inflation here = TPM cap breach = 429 storm.
+        if not passive:
+            try:
+                n_pre, tok_pre = await _run_sync(
+                    loop, _evict_inbound_to_ceiling, config, project_id, payload, adapter
+                )
+                if n_pre > 0:
+                    log.info(
+                        "pre_forward_evict project=%s turns=%d tokens=%d",
+                        project_id, n_pre, tok_pre,
+                    )
+            except Exception:
+                log.exception("pre-forward eviction failed project=%s", project_id)
 
         forwarded_body = json.dumps(payload).encode("utf-8")
         fwd_headers = {
