@@ -681,6 +681,25 @@ def create_app(config: Config) -> FastAPI:
             )
         project_id = request.state.project_id
 
+        # Debug dump: when SPILLOVER_DUMP_REQUESTS=1, log inbound payload size
+        # + message count for every request. Helps diagnose "Context limit
+        # reached" by showing CC's view of the conversation when it walls.
+        import os as _os_dump
+        if _os_dump.environ.get("SPILLOVER_DUMP_REQUESTS") not in (None, "", "0", "false"):
+            try:
+                _msgs = payload.get("messages") or []
+                _sys = payload.get("system")
+                _sys_tokens = count_tokens(_sys) if _sys else 0
+                _msg_tokens = sum(count_tokens(m.get("content")) for m in _msgs)
+                _model = payload.get("model", "?")
+                _log.warning(
+                    "INBOUND project=%s model=%s msgs=%d sys_tokens=%d msg_tokens=%d total=%d body_bytes=%d",
+                    project_id, _model, len(_msgs), _sys_tokens,
+                    _msg_tokens, _sys_tokens + _msg_tokens, len(body),
+                )
+            except Exception:
+                _log.exception("INBOUND dump failed")
+
         from spillover.counter_compact.intercept import (
             make_intercept_response,
             should_intercept_request,
@@ -741,12 +760,14 @@ def create_app(config: Config) -> FastAPI:
 
             # 3) Pre-forward eviction: trim middle to fit under
             # (ceiling - retrieval_reserve). Archives evicted turns.
+            pre_forward_tokens_freed = 0
             try:
                 n_pre, tok_pre = await _run_sync(
                     loop, _evict_inbound_to_ceiling,
                     config, project_id, payload, adapter, retrieval_reserve,
                 )
                 if n_pre > 0:
+                    pre_forward_tokens_freed = tok_pre
                     log.info(
                         "pre_forward_evict project=%s turns=%d tokens=%d reserve=%d",
                         project_id, n_pre, tok_pre, retrieval_reserve,
@@ -840,12 +861,16 @@ def create_app(config: Config) -> FastAPI:
                         loop, _maybe_evict,
                         config, project_id, payload, assistant_text, usage, adapter,
                     )
-                    if tokens_archived > 0:
+                    # Rewrite always subtracts BOTH pre-forward eviction tokens
+                    # AND post-response archived tokens so CC's local context
+                    # counter shrinks proportionally with the total trim work.
+                    total_subtract = tokens_archived + pre_forward_tokens_freed
+                    if total_subtract > 0:
                         try:
                             resp_json = json.loads(resp_bytes)
                         except json.JSONDecodeError:
                             resp_json = {}
-                        resp_json = rewrite_response_json(resp_json, tokens_archived)
+                        resp_json = rewrite_response_json(resp_json, total_subtract)
                         resp_bytes = json.dumps(resp_json).encode("utf-8")
             if r.status_code >= 400:
                 log.warning(
@@ -947,8 +972,11 @@ def create_app(config: Config) -> FastAPI:
                             _evict_loop, _maybe_evict,
                             config, project_id, payload, assistant_text, usage, adapter,
                         )
-                if rewrite_enabled and tail_buffer and tokens_archived_s > 0:
-                    yield rewrite_sse_body(tail_buffer, tokens_archived_s)
+                # Include pre-forward eviction tokens in the SSE usage rewrite
+                # so CC's local context tracker reflects the full trim work.
+                total_subtract_s = tokens_archived_s + pre_forward_tokens_freed
+                if rewrite_enabled and tail_buffer and total_subtract_s > 0:
+                    yield rewrite_sse_body(tail_buffer, total_subtract_s)
                 elif tail_buffer:
                     yield tail_buffer
                 if upstream.status_code >= 400:
