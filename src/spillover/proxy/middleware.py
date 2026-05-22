@@ -38,14 +38,6 @@ class ProjectIdMiddleware(BaseHTTPMiddleware):
             )
 
         if not raw:
-            return JSONResponse(
-                {
-                    "error": (
-                        "no project_id resolved. Pass one of: path prefix "
-                        "/p/<id>/..., X-Project header, or SPILLOVER_PROJECT_ID env"
-                    )
-                },
-                status_code=400,
-            )
+            raw = os.environ.get("SPILLOVER_DEFAULT_PROJECT_ID", "default")
         request.state.project_id = _resolve_project_id(raw)
         return await call_next(request)

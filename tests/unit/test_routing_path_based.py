@@ -46,10 +46,13 @@ def test_header_still_works(app_client):
     assert r.json()["project_id"] == "abcdef12"
 
 
-def test_no_project_anywhere_returns_400(app_client, monkeypatch):
+def test_no_project_anywhere_falls_back_to_default(app_client, monkeypatch):
+    """No path /p/, no header, no env: middleware uses 'default' pool."""
     monkeypatch.delenv("SPILLOVER_PROJECT_ID", raising=False)
+    monkeypatch.delenv("SPILLOVER_DEFAULT_PROJECT_ID", raising=False)
     r = app_client.post("/v1/messages", json={})
-    assert r.status_code == 400
+    assert r.status_code == 200
+    assert r.json()["project_id"] == hashlib.sha1(b"default").hexdigest()
 
 
 def test_health_exempt_from_path_check(app_client):

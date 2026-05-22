@@ -555,12 +555,12 @@ def create_app(config: Config) -> FastAPI:
 
         if not is_stream:
             with request_duration.labels(phase="upstream").time():
-                async def _post():
-                    return await app.state.http_client.post(
-                        upstream_url, headers=fwd_headers, content=forwarded_body
-                    )
-
-                r = await with_retry(_post)
+                # Pure passthrough -- NO proxy-side retry. Client (Claude Code)
+                # already retries with its own backoff; doubling that here just
+                # multiplies 429 amplification against the user's OAuth quota.
+                r = await app.state.http_client.post(
+                    upstream_url, headers=fwd_headers, content=forwarded_body
+                )
             fallback_used: str | None = None
             primary_model = payload.get("model", "")
             fb_model = (
@@ -568,7 +568,10 @@ def create_app(config: Config) -> FastAPI:
                 if provider == "anthropic"
                 else config.fallback_model_openai
             )
-            if should_fallback(r, fb_model, primary_model):
+            # Fallback is opt-in (empty by default). When configured AND the
+            # upstream returned a retryable status, swap models exactly once
+            # (no retry chain on the fallback either).
+            if fb_model and should_fallback(r, fb_model, primary_model):
                 fb_resp, used = await attempt_fallback_unary(
                     app.state.http_client,
                     upstream_url,
@@ -634,14 +637,15 @@ def create_app(config: Config) -> FastAPI:
 
         rewrite_enabled = _stream_rewrite_enabled(config)
 
+        # Pure passthrough on streaming. No proxy-side retry -- Claude Code
+        # already retries with its own backoff. Doubling retries amplifies
+        # 429 against the user's OAuth quota (proxy + client = N x M bursts).
         def _build_stream_request():
             return app.state.http_client.build_request(
                 "POST", upstream_url, headers=fwd_headers, content=forwarded_body
             )
 
-        upstream = await with_retry_stream(
-            app.state.http_client, _build_stream_request
-        )
+        upstream = await app.state.http_client.send(_build_stream_request(), stream=True)
         stream_fallback_used: str | None = None
         stream_primary_model = payload.get("model", "")
         stream_fb_model = (
@@ -649,7 +653,8 @@ def create_app(config: Config) -> FastAPI:
             if provider == "anthropic"
             else config.fallback_model_openai
         )
-        if should_fallback(upstream, stream_fb_model, stream_primary_model):
+        # Fallback is opt-in (empty by default) and ONE-SHOT only.
+        if stream_fb_model and should_fallback(upstream, stream_fb_model, stream_primary_model):
             await upstream.aclose()
 
             def _build_fb_request(new_body: bytes):
@@ -669,9 +674,9 @@ def create_app(config: Config) -> FastAPI:
                 upstream = fb_upstream
                 stream_fallback_used = stream_fb_model
             else:
-                # fallback failed too -- reopen original to surface 429 honestly
-                upstream = await with_retry_stream(
-                    app.state.http_client, _build_stream_request, max_attempts=1
+                # fallback failed too -- single fresh open to surface 429 honestly
+                upstream = await app.state.http_client.send(
+                    _build_stream_request(), stream=True
                 )
         sink: list[bytes] = []
 

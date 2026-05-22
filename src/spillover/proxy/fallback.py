@@ -69,23 +69,18 @@ async def attempt_fallback_unary(
     current_model: str,
     fallback_model: str,
 ) -> tuple[httpx.Response, bool]:
-    """Try fallback with retry. Returns (response, used_fallback)."""
+    """Try fallback ONCE (no retry). Returns (response, used_fallback)."""
     if not fallback_model or fallback_model == current_model:
         return None, False  # type: ignore[return-value]
-    from spillover.proxy.retry import with_retry
     new_body = rewrite_payload_model(payload_bytes, fallback_model)
     new_headers = {**headers}
     new_headers["content-length"] = str(len(new_body))
     log.warning(
-        "model fallback %s -> %s (upstream 429 on primary)",
+        "model fallback %s -> %s (upstream non-2xx on primary)",
         current_model,
         fallback_model,
     )
-
-    async def _post():
-        return await client.post(url, headers=new_headers, content=new_body)
-
-    resp = await with_retry(_post)
+    resp = await client.post(url, headers=new_headers, content=new_body)
     return resp, True
 
 
@@ -96,19 +91,14 @@ async def attempt_fallback_stream(
     current_model: str,
     fallback_model: str,
 ) -> tuple[httpx.Response, bool]:
-    """Streaming variant with retry. Returns (open response, used_fallback)."""
+    """Streaming variant ONCE (no retry). Returns (open response, used_fallback)."""
     if not fallback_model or fallback_model == current_model:
         return None, False  # type: ignore[return-value]
-    from spillover.proxy.retry import with_retry_stream
     new_body = rewrite_payload_model(payload_bytes, fallback_model)
     log.warning(
         "model fallback (stream) %s -> %s",
         current_model,
         fallback_model,
     )
-
-    def _build():
-        return build_request(new_body)
-
-    resp = await with_retry_stream(client, _build)
+    resp = await client.send(build_request(new_body), stream=True)
     return resp, True

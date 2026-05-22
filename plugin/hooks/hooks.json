@@ -21,11 +21,6 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/ensure-proxy.sh\"",
             "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/session-env.sh\"",
-            "timeout": 10
           }
         ]
       }

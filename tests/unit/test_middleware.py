@@ -33,11 +33,21 @@ def test_middleware_hashes_arbitrary_path_when_unhashed(client):
     assert r.json()["project_id"] == expected
 
 
-def test_middleware_400_when_missing(client, monkeypatch):
+def test_middleware_falls_back_to_default_project(client, monkeypatch):
+    """When no /p/, header, or env is given, middleware uses 'default' project."""
     monkeypatch.delenv("SPILLOVER_PROJECT_ID", raising=False)
+    monkeypatch.delenv("SPILLOVER_DEFAULT_PROJECT_ID", raising=False)
     r = client.get("/echo")
-    assert r.status_code == 400
-    assert "X-Project" in r.text
+    assert r.status_code == 200
+    assert r.json()["project_id"] == hashlib.sha1(b"default").hexdigest()
+
+
+def test_middleware_default_overridable(client, monkeypatch):
+    monkeypatch.delenv("SPILLOVER_PROJECT_ID", raising=False)
+    monkeypatch.setenv("SPILLOVER_DEFAULT_PROJECT_ID", "myhouse")
+    r = client.get("/echo")
+    assert r.status_code == 200
+    assert r.json()["project_id"] == hashlib.sha1(b"myhouse").hexdigest()
 
 
 def test_middleware_falls_back_to_env(client, monkeypatch):
