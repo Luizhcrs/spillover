@@ -49,6 +49,19 @@ spillover sits as a transparent HTTP proxy between any Anthropic- or OpenAI-API 
 2. **Injects relevant past episodes back as long-term memory** via hybrid retrieval (vector top-K from `sqlite-vec` + k-hop graph walk from Kuzu, fused with Reciprocal Rank Fusion). The agent re-reads its own prior decisions and tool calls as part of every new prompt — with **zero agent-side awareness**.
 3. **Defends against client-side compaction.** Most CLIs auto-compact when they perceive context pressure. spillover rewrites the `usage.input_tokens` it returns so the client believes it has headroom, intercepts explicit compact requests, and rescues turns the client drops anyway by diffing inbound conversations against a `seen_turns` table.
 
+### Recommended: install as a native Claude Code plugin
+
+```bash
+pip install spillover                                   # daemon binary
+# inside Claude Code:
+/plugin marketplace add Luizhcrs/spillover
+/plugin install spillover@spillover-marketplace
+```
+
+The plugin's Setup hook spawns the local proxy daemon (`spillover up`) the first time it runs and the SessionStart hook writes `ANTHROPIC_BASE_URL` plus the disable-compact env vars into `$CLAUDE_ENV_FILE`. From that point on, just type `claude` in any directory — each working directory gets an isolated archive keyed by `sha1(cwd)` and the proxy is fully transparent.
+
+### Manual / non-plugin clients (Codex, Cursor, Continue.dev, raw SDK)
+
 ```bash
 git clone https://github.com/Luizhcrs/spillover
 cd spillover
@@ -61,13 +74,13 @@ In another terminal, point any client at the proxy:
 ```bash
 ANTHROPIC_BASE_URL=http://127.0.0.1:8787 \
 SPILLOVER_PROJECT_ID=$(pwd | sha1sum | cut -c1-40) \
-claude code
+your-cli
 ```
 
-Or use one of the bundled wrappers:
+Or use one of the bundled wrappers (legacy, prefer the plugin for Claude Code):
 
 ```bash
-spillover-cc        # Claude Code
+spillover-cc        # Claude Code (legacy wrapper)
 spillover-codex     # Codex
 spillover-cursor    # Cursor
 spillover-continue  # Continue.dev
