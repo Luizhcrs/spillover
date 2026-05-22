@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -934,10 +935,12 @@ def create_app(config: Config) -> FastAPI:
                         config, project_id, payload, assistant_text, usage, adapter,
                     )
                     # Rewrite always subtracts BOTH pre-forward eviction tokens
-                    # AND post-response archived tokens so CC's local context
-                    # counter shrinks proportionally with the total trim work.
+                    # AND post-response archived tokens. Also fires unconditionally
+                    # when SPILLOVER_REPORTED_INPUT_CAP is set so the cap can clamp
+                    # input_tokens reported to the client (push back CC's wall).
                     total_subtract = tokens_archived + pre_forward_tokens_freed
-                    if total_subtract > 0:
+                    _cap = os.environ.get("SPILLOVER_REPORTED_INPUT_CAP", "0")
+                    if total_subtract > 0 or (_cap and _cap != "0"):
                         try:
                             resp_json = json.loads(resp_bytes)
                         except json.JSONDecodeError:
@@ -1048,7 +1051,9 @@ def create_app(config: Config) -> FastAPI:
                 # Include pre-forward eviction tokens in the SSE usage rewrite
                 # so CC's local context tracker reflects the full trim work.
                 total_subtract_s = tokens_archived_s + pre_forward_tokens_freed
-                if rewrite_enabled and tail_buffer and total_subtract_s > 0:
+                _cap_s = os.environ.get("SPILLOVER_REPORTED_INPUT_CAP", "0")
+                _cap_active_s = bool(_cap_s) and _cap_s != "0"
+                if rewrite_enabled and tail_buffer and (total_subtract_s > 0 or _cap_active_s):
                     yield rewrite_sse_body(tail_buffer, total_subtract_s)
                 elif tail_buffer:
                     yield tail_buffer

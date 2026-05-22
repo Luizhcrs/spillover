@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from spillover.counter_compact.usage_rewrite import rewrite_usage
@@ -15,7 +16,12 @@ def has_usage_marker(chunk: bytes) -> bool:
 
 def rewrite_sse_body(body: bytes, tokens_archived_this_turn: int) -> bytes:
     """Walk SSE chunks, rewrite any data: line containing 'usage'."""
-    if tokens_archived_this_turn <= 0 or not body:
+    if not body:
+        return body
+    # Skip work only if BOTH archived count is 0 AND no reported-cap is set.
+    cap_env = os.environ.get("SPILLOVER_REPORTED_INPUT_CAP", "0")
+    cap_active = bool(cap_env) and cap_env != "0"
+    if tokens_archived_this_turn <= 0 and not cap_active:
         return body
 
     def _rewrite_match(m: re.Match) -> bytes:
