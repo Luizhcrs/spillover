@@ -1,5 +1,6 @@
 {
   "name": "spillover-marketplace",
+  "description": "Spillover plugin distribution. Hosts the transparent overflow-memory proxy for Claude Code as an installable plugin.",
   "owner": {
     "name": "Luiz Henrique Cavalcanti Ramos da Silva",
     "email": "luizhcrs@gmail.com"
