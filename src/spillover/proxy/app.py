@@ -22,6 +22,12 @@ from spillover.facet.entities import extract_entities
 from spillover.facet.worker import FacetEvent, FacetWorker
 from spillover.logging import configure_root_logger, get_logger
 from spillover.proxy.middleware import ProjectIdMiddleware
+from spillover.proxy.fallback import (
+    attempt_fallback_stream,
+    attempt_fallback_unary,
+    make_sse_banner,
+    should_fallback,
+)
 from spillover.proxy.retry import with_retry, with_retry_stream
 from spillover.retriever.budget import trim_to_budget
 from spillover.retriever.fusion import rrf_fuse
@@ -555,6 +561,25 @@ def create_app(config: Config) -> FastAPI:
                     )
 
                 r = await with_retry(_post)
+            fallback_used: str | None = None
+            primary_model = payload.get("model", "")
+            fb_model = (
+                config.fallback_model_anthropic
+                if provider == "anthropic"
+                else config.fallback_model_openai
+            )
+            if should_fallback(r, fb_model, primary_model):
+                fb_resp, used = await attempt_fallback_unary(
+                    app.state.http_client,
+                    upstream_url,
+                    fwd_headers,
+                    forwarded_body,
+                    primary_model,
+                    fb_model,
+                )
+                if used and fb_resp is not None and fb_resp.status_code < 400:
+                    r = fb_resp
+                    fallback_used = fb_model
             resp_bytes = r.content
             archived_ids: list[str] = []
             tokens_archived = 0
@@ -595,10 +620,13 @@ def create_app(config: Config) -> FastAPI:
                 provider=provider,
                 status=str(r.status_code),
             ).inc()
+            resp_headers = {"content-type": "application/json"}
+            if fallback_used:
+                resp_headers["x-spillover-fallback-model"] = fallback_used
             return JSONResponse(
                 content=json.loads(resp_bytes),
                 status_code=r.status_code,
-                headers={"content-type": "application/json"},
+                headers=resp_headers,
             )
 
         # Streaming branch (incremental SSE rewrite)
@@ -614,12 +642,45 @@ def create_app(config: Config) -> FastAPI:
         upstream = await with_retry_stream(
             app.state.http_client, _build_stream_request
         )
+        stream_fallback_used: str | None = None
+        stream_primary_model = payload.get("model", "")
+        stream_fb_model = (
+            config.fallback_model_anthropic
+            if provider == "anthropic"
+            else config.fallback_model_openai
+        )
+        if should_fallback(upstream, stream_fb_model, stream_primary_model):
+            await upstream.aclose()
+
+            def _build_fb_request(new_body: bytes):
+                fb_hdrs = {**fwd_headers, "content-length": str(len(new_body))}
+                return app.state.http_client.build_request(
+                    "POST", upstream_url, headers=fb_hdrs, content=new_body
+                )
+
+            fb_upstream, fb_used = await attempt_fallback_stream(
+                app.state.http_client,
+                _build_fb_request,
+                forwarded_body,
+                stream_primary_model,
+                stream_fb_model,
+            )
+            if fb_used and fb_upstream is not None and fb_upstream.status_code < 400:
+                upstream = fb_upstream
+                stream_fallback_used = stream_fb_model
+            else:
+                # fallback failed too -- reopen original to surface 429 honestly
+                upstream = await with_retry_stream(
+                    app.state.http_client, _build_stream_request, max_attempts=1
+                )
         sink: list[bytes] = []
 
         async def proxy_stream():
             archived_ids_s: list[str] = []
             tokens_archived_s = 0
             tail_buffer = b""
+            if stream_fallback_used:
+                yield make_sse_banner(stream_primary_model, stream_fallback_used)
             try:
                 async for chunk in upstream.aiter_bytes():
                     sink.append(chunk)
@@ -662,10 +723,14 @@ def create_app(config: Config) -> FastAPI:
                     status=str(upstream.status_code),
                 ).inc()
 
+        stream_resp_headers = {}
+        if stream_fallback_used:
+            stream_resp_headers["x-spillover-fallback-model"] = stream_fallback_used
         return StreamingResponse(
             proxy_stream(),
             media_type="text/event-stream",
             status_code=upstream.status_code,
+            headers=stream_resp_headers,
         )
 
     @app.post("/v1/messages")

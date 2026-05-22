@@ -27,6 +27,8 @@ class Config:
     retriever_graph_k: int
     retriever_bm25_k: int
     profile_default: str  # "coding" | "research" | "conversation" | "auto"
+    fallback_model_anthropic: str  # empty = disabled
+    fallback_model_openai: str
 
     @property
     def window_max(self) -> int:
@@ -58,4 +60,13 @@ class Config:
             retriever_graph_k=int(os.environ.get("SPILLOVER_RETRIEVER_GRAPH_K", "50")),
             retriever_bm25_k=int(os.environ.get("SPILLOVER_RETRIEVER_BM25_K", "50")),
             profile_default=os.environ.get("SPILLOVER_PROFILE_DEFAULT", "auto"),
+            fallback_model_anthropic=os.environ.get(
+                "SPILLOVER_FALLBACK_MODEL_ANTHROPIC",
+                os.environ.get(
+                    "SPILLOVER_FALLBACK_MODEL", "claude-haiku-4-5-20251001"
+                ),
+            ),
+            fallback_model_openai=os.environ.get(
+                "SPILLOVER_FALLBACK_MODEL_OPENAI", "gpt-4o-mini"
+            ),
         )
