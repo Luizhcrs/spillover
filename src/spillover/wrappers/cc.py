@@ -43,7 +43,7 @@ def main(ctx, proxy: str | None, project: str | None):
     # small HTTP client that does support custom headers.
     env["SPILLOVER_PROJECT_ID"] = project_id
 
-    cmd = ["claude", "code", *ctx.args]
+    cmd = ["claude", *ctx.args]
     click.echo(
         f"spillover-cc: ANTHROPIC_BASE_URL={proxy_url} "
         f"X-Project(env SPILLOVER_PROJECT_ID)={project_id}"

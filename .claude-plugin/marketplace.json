@@ -1,0 +1,27 @@
+{
+  "name": "spillover-marketplace",
+  "owner": {
+    "name": "Luiz Henrique Cavalcanti Ramos da Silva",
+    "email": "luizhcrs@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "spillover",
+      "description": "Transparent overflow-memory proxy for Claude Code. Archives turns instead of compacting them; injects relevant past episodes via hybrid retrieval (vector + graph + BM25 + causal); defends against client-side compaction. Apache-2.0.",
+      "author": {
+        "name": "Luiz Henrique Cavalcanti Ramos da Silva",
+        "email": "luizhcrs@gmail.com",
+        "url": "https://github.com/Luizhcrs"
+      },
+      "category": "productivity",
+      "homepage": "https://github.com/Luizhcrs/spillover",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/Luizhcrs/spillover.git",
+        "path": "plugin",
+        "ref": "master"
+      },
+      "tags": ["memory", "rag", "context", "overflow", "retrieval"]
+    }
+  ]
+}
