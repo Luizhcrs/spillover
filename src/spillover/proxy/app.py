@@ -318,7 +318,27 @@ def _evict_inbound_to_ceiling(
     system_tokens = count_tokens(system) if system else 0
     turn_tokens = [count_tokens(m.get("content")) for m in messages]
     total = system_tokens + sum(turn_tokens)
-    effective_ceiling = max(0, config.operational_ceiling_tokens - retrieval_reserve)
+    import os as _os
+    # Live-read ceiling each request: lets `spillover ceiling N` take effect
+    # without restarting the daemon. The CLI writes ~/.spillover/runtime.env
+    # which we re-read on every eviction call.
+    _runtime = config.db_root / "runtime.env"
+    if _runtime.exists():
+        try:
+            for line in _runtime.read_text(encoding="utf-8").splitlines():
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    _os.environ[k.strip()] = v.strip()
+        except Exception:
+            pass
+    try:
+        live_ceiling = int(_os.environ.get(
+            "SPILLOVER_OPERATIONAL_CEILING_TOKENS",
+            str(config.operational_ceiling_tokens),
+        ))
+    except ValueError:
+        live_ceiling = config.operational_ceiling_tokens
+    effective_ceiling = max(0, live_ceiling - retrieval_reserve)
     if total <= effective_ceiling:
         return 0, 0
     ceiling = effective_ceiling

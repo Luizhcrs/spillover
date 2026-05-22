@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from pathlib import Path
 
@@ -110,6 +111,39 @@ def query(project_id: str, text: str, topk: int | None):
             )
     finally:
         db.close()
+
+
+@main.command()
+@click.argument("tokens", type=int)
+def ceiling(tokens: int):
+    """Set the proxy's operational ceiling (max outbound tokens per request).
+
+    Persists SPILLOVER_OPERATIONAL_CEILING_TOKENS into the running daemon's
+    environment via a sidecar file the daemon re-reads on every request.
+    Takes effect immediately -- no restart.
+    """
+    if tokens < 1000:
+        click.echo("refusing ceiling < 1000 tokens (would block all real requests)", err=True)
+        raise SystemExit(2)
+    config = Config.from_env()
+    state_file = config.db_root / "runtime.env"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    existing = {}
+    if state_file.exists():
+        for line in state_file.read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                existing[k.strip()] = v.strip()
+    existing["SPILLOVER_OPERATIONAL_CEILING_TOKENS"] = str(tokens)
+    state_file.write_text(
+        "\n".join(f"{k}={v}" for k, v in existing.items()) + "\n",
+        encoding="utf-8",
+    )
+    # Also export into current process so this CLI invocation's hint matches.
+    os.environ["SPILLOVER_OPERATIONAL_CEILING_TOKENS"] = str(tokens)
+    click.echo(f"ceiling set to {tokens} tokens")
+    click.echo(f"  written to {state_file}")
+    click.echo("  takes effect on next request (proxy reads live).")
 
 
 @main.command()
