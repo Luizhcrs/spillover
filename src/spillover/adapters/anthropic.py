@@ -128,12 +128,36 @@ class AnthropicAdapter(Adapter):
         return text
 
     def inject_ltm(self, payload: dict, ltm_text: str) -> None:
+        """Inject LTM block into the Anthropic `system` field.
+
+        For list-shaped system (Claude Code default), CC puts a billing-header
+        block at index 0 and an identity block at index 1. We MUST NOT shift
+        those -- Anthropic uses block 0 for billing routing. Insert the LTM
+        block AFTER the billing/identity anchor (at position 2) so server-side
+        order is preserved.
+        """
         if not ltm_text:
             return
         existing = payload.get("system")
         if existing is None:
             payload["system"] = ltm_text
-        elif isinstance(existing, str):
+            return
+        if isinstance(existing, str):
             payload["system"] = ltm_text + "\n\n" + existing
-        elif isinstance(existing, list):
-            payload["system"] = [{"type": "text", "text": ltm_text}, *existing]
+            return
+        if isinstance(existing, list):
+            block = {"type": "text", "text": ltm_text}
+            # Preserve billing-header anchor: detect by presence of any
+            # block whose text starts with "x-anthropic-billing-header".
+            anchor_end = 0
+            for i, b in enumerate(existing):
+                if not isinstance(b, dict):
+                    continue
+                t = (b.get("text") or "")
+                if t.startswith("x-anthropic-billing-header") or "Claude agent" in t[:120]:
+                    anchor_end = i + 1
+                else:
+                    break
+            payload["system"] = (
+                list(existing[:anchor_end]) + [block] + list(existing[anchor_end:])
+            )

@@ -29,9 +29,47 @@ class RescuedTurn:
     original_hash: str
 
 
+def _normalise_content_for_hash(content):
+    """Strip volatile fields (tool_use ids, metadata) before hashing so the
+    same logical assistant turn produces the same hash across requests.
+
+    Claude Code's assistant turns embed `tool_use` blocks with per-request
+    UUIDs; without normalisation, the hash changes every turn and
+    detect_compaction sees every prior assistant turn as "missing" -- a
+    massive false-positive cascade."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        out = []
+        for b in content:
+            if not isinstance(b, dict):
+                out.append(b)
+                continue
+            t = b.get("type")
+            if t == "text":
+                out.append({"type": "text", "text": b.get("text", "")})
+            elif t == "tool_use":
+                out.append({"type": "tool_use",
+                            "name": b.get("name"),
+                            "input": b.get("input")})
+            elif t == "tool_result":
+                out.append({"type": "tool_result",
+                            "content": b.get("content")})
+            elif t == "thinking":
+                # Skip thinking blocks entirely -- they vary per inference.
+                continue
+            else:
+                out.append(b)
+        return out
+    return content
+
+
 def _hash_assistant_message(msg: dict) -> str:
     payload = json.dumps(
-        {"role": msg.get("role"), "content": msg.get("content")},
+        {
+            "role": msg.get("role"),
+            "content": _normalise_content_for_hash(msg.get("content")),
+        },
         sort_keys=True,
         ensure_ascii=False,
     )

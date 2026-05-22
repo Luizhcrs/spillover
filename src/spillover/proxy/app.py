@@ -681,9 +681,11 @@ def create_app(config: Config) -> FastAPI:
             )
         project_id = request.state.project_id
 
-        # Debug dump: when SPILLOVER_DUMP_REQUESTS=1, log inbound payload size
-        # + message count for every request. Helps diagnose "Context limit
-        # reached" by showing CC's view of the conversation when it walls.
+        # Debug dump. Two levels:
+        # - SPILLOVER_DUMP_REQUESTS=1: log inbound size summary to stderr.
+        # - SPILLOVER_DUMP_DIR=/path: save inbound + outbound payload JSON
+        #   files for every request. Use to inspect exactly what spillover
+        #   transformed.
         import os as _os_dump
         if _os_dump.environ.get("SPILLOVER_DUMP_REQUESTS") not in (None, "", "0", "false"):
             try:
@@ -699,6 +701,38 @@ def create_app(config: Config) -> FastAPI:
                 )
             except Exception:
                 _log.exception("INBOUND dump failed")
+        _dump_dir = _os_dump.environ.get("SPILLOVER_DUMP_DIR")
+        _dump_id = None
+        if _dump_dir:
+            try:
+                from pathlib import Path as _Path
+                import uuid as _uuid
+                _dump_path = _Path(_dump_dir)
+                _dump_path.mkdir(parents=True, exist_ok=True)
+                _dump_id = f"{int(time.time())}-{_uuid.uuid4().hex[:8]}"
+                _msgs = payload.get("messages") or []
+                _sys = payload.get("system")
+                _sys_tokens = count_tokens(_sys) if _sys else 0
+                _msg_tokens = sum(count_tokens(m.get("content")) for m in _msgs)
+                inbound_meta = {
+                    "kind": "inbound",
+                    "id": _dump_id,
+                    "ts": int(time.time() * 1000),
+                    "project_id": project_id,
+                    "model": payload.get("model"),
+                    "stream": bool(payload.get("stream")),
+                    "msgs_count": len(_msgs),
+                    "sys_tokens": _sys_tokens,
+                    "msg_tokens": _msg_tokens,
+                    "total_tokens": _sys_tokens + _msg_tokens,
+                    "body_bytes": len(body),
+                }
+                (_dump_path / f"{_dump_id}.inbound.json").write_text(
+                    json.dumps({"_meta": inbound_meta, "payload": payload}, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            except Exception:
+                _log.exception("INBOUND payload dump failed")
 
         from spillover.counter_compact.intercept import (
             make_intercept_response,
@@ -816,13 +850,51 @@ def create_app(config: Config) -> FastAPI:
         }
         is_stream = bool(payload.get("stream"))
 
+        # Dump outbound (post-transform) payload for inspection.
+        if _dump_dir and _dump_id:
+            try:
+                from pathlib import Path as _Path2
+                _dump_path2 = _Path2(_dump_dir)
+                _msgs2 = payload.get("messages") or []
+                _sys2 = payload.get("system")
+                _sys_tokens2 = count_tokens(_sys2) if _sys2 else 0
+                _msg_tokens2 = sum(count_tokens(m.get("content")) for m in _msgs2)
+                outbound_meta = {
+                    "kind": "outbound",
+                    "id": _dump_id,
+                    "ts": int(time.time() * 1000),
+                    "project_id": project_id,
+                    "model": payload.get("model"),
+                    "msgs_count": len(_msgs2),
+                    "sys_tokens": _sys_tokens2,
+                    "msg_tokens": _msg_tokens2,
+                    "total_tokens": _sys_tokens2 + _msg_tokens2,
+                    "body_bytes": len(forwarded_body),
+                    "pre_forward_tokens_freed": pre_forward_tokens_freed if not passive else 0,
+                    "rescue_count": len(rescue_ids) if not passive else 0,
+                }
+                (_dump_path2 / f"{_dump_id}.outbound.json").write_text(
+                    json.dumps({"_meta": outbound_meta, "payload": payload}, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            except Exception:
+                _log.exception("OUTBOUND payload dump failed")
+
+        # Preserve query string from the inbound request when forwarding.
+        # CC sends e.g. `/v1/messages?beta=true` -- stripping the query causes
+        # the upstream to skip beta-gated behaviors silently.
+        upstream_url_with_q = upstream_url
+        if request.url.query:
+            sep = "&" if "?" in upstream_url_with_q else "?"
+            upstream_url_with_q = f"{upstream_url_with_q}{sep}{request.url.query}"
+
         if not is_stream:
             with request_duration.labels(phase="upstream").time():
                 # Pure passthrough -- NO proxy-side retry. Client (Claude Code)
                 # already retries with its own backoff; doubling that here just
                 # multiplies 429 amplification against the user's OAuth quota.
                 r = await app.state.http_client.post(
-                    upstream_url, headers=fwd_headers, content=forwarded_body
+                    upstream_url_with_q, headers=fwd_headers, content=forwarded_body
                 )
             fallback_used: str | None = None
             primary_model = payload.get("model", "")
@@ -837,7 +909,7 @@ def create_app(config: Config) -> FastAPI:
             if fb_model and should_fallback(r, fb_model, primary_model):
                 fb_resp, used = await attempt_fallback_unary(
                     app.state.http_client,
-                    upstream_url,
+                    upstream_url_with_q,
                     fwd_headers,
                     forwarded_body,
                     primary_model,
@@ -907,9 +979,10 @@ def create_app(config: Config) -> FastAPI:
         # Pure passthrough on streaming. No proxy-side retry -- Claude Code
         # already retries with its own backoff. Doubling retries amplifies
         # 429 against the user's OAuth quota (proxy + client = N x M bursts).
+        # Use the with-query URL so beta query params reach upstream.
         def _build_stream_request():
             return app.state.http_client.build_request(
-                "POST", upstream_url, headers=fwd_headers, content=forwarded_body
+                "POST", upstream_url_with_q, headers=fwd_headers, content=forwarded_body
             )
 
         upstream = await app.state.http_client.send(_build_stream_request(), stream=True)
@@ -927,7 +1000,7 @@ def create_app(config: Config) -> FastAPI:
             def _build_fb_request(new_body: bytes):
                 fb_hdrs = {**fwd_headers, "content-length": str(len(new_body))}
                 return app.state.http_client.build_request(
-                    "POST", upstream_url, headers=fb_hdrs, content=new_body
+                    "POST", upstream_url_with_q, headers=fb_hdrs, content=new_body
                 )
 
             fb_upstream, fb_used = await attempt_fallback_stream(
