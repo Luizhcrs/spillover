@@ -175,6 +175,10 @@ def _settings_path() -> Path:
 
 _ROUTE_KEYS = (
     "ANTHROPIC_BASE_URL",
+    # Current Claude Code (>=2.1.x) auto-compact knobs:
+    "DISABLE_AUTO_COMPACT",           # canonical disable flag
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",  # set to 100 so compaction never trips
+    # Legacy variants — keep cleaning them on `route off` for old installs:
     "CLAUDE_CODE_AUTO_COMPACT",
     "CLAUDE_CODE_DISABLE_COMPACT",
     "CLAUDE_CODE_DISABLE_AUTO_COMPACT",
@@ -221,10 +225,17 @@ def route_on(port: int | None, passive: bool):
     path, data = _load_settings()
     env = data.get("env") or {}
     env["ANTHROPIC_BASE_URL"] = base_url
-    env["CLAUDE_CODE_AUTO_COMPACT"] = "0"
-    env["CLAUDE_CODE_DISABLE_COMPACT"] = "1"
-    env["CLAUDE_CODE_DISABLE_AUTO_COMPACT"] = "1"
-    env["DISABLE_AUTOCOMPACT"] = "true"
+    # Canonical disable flags for current Claude Code (>=2.1.x):
+    env["DISABLE_AUTO_COMPACT"] = "1"
+    env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = "100"
+    # Drop legacy variants if previously written (some users keep them around):
+    for legacy in (
+        "CLAUDE_CODE_AUTO_COMPACT",
+        "CLAUDE_CODE_DISABLE_COMPACT",
+        "CLAUDE_CODE_DISABLE_AUTO_COMPACT",
+        "DISABLE_AUTOCOMPACT",
+    ):
+        env.pop(legacy, None)
     if passive:
         env["SPILLOVER_PASSIVE"] = "1"
     else:

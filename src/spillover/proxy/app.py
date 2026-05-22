@@ -291,18 +291,24 @@ def _evict_inbound_to_ceiling(
     project_id: str,
     payload: dict,
     adapter: Adapter,
+    retrieval_reserve: int = 0,
 ) -> tuple[int, int]:
-    """Trim payload BEFORE forwarding so size stays <= operational_ceiling_tokens.
+    """Trim payload BEFORE forwarding so size stays <= operational_ceiling.
+
+    `retrieval_reserve` reserves headroom for an LTM block that will be
+    injected AFTER eviction. Eviction targets `ceiling - retrieval_reserve`
+    so that the final outbound payload (surviving turns + retrieval block)
+    fits within the ceiling. This is the "size-neutral" contract: Anthropic
+    never sees more bytes than the user's CC client would have sent direct.
 
     Operates only on Anthropic-shape messages (role/content list). Removes
-    oldest non-recent middle turns until the payload's total token estimate
-    is under the ceiling. Archives every removed turn into the project store
-    so retrieval can recall them later. Returns (turns_removed, tokens_freed).
+    oldest non-recent middle turns until total <= effective_ceiling.
+    Archives every removed turn into the project store so retrieval can
+    recall them later. Returns (turns_removed, tokens_freed).
 
     System block + first 2 turns (anchor) + last `recent_buffer` turns are
-    preserved. If even after maximum trimming the payload is still too big,
-    we stop and let the upstream complain -- never drop the anchor or recent
-    context to "make it fit".
+    preserved. Tool_use / tool_result blocks are skipped to keep Anthropic's
+    pairing invariant intact.
     """
     messages = payload.get("messages") or []
     if not messages:
@@ -312,9 +318,10 @@ def _evict_inbound_to_ceiling(
     system_tokens = count_tokens(system) if system else 0
     turn_tokens = [count_tokens(m.get("content")) for m in messages]
     total = system_tokens + sum(turn_tokens)
-    ceiling = config.operational_ceiling_tokens
-    if total <= ceiling:
+    effective_ceiling = max(0, config.operational_ceiling_tokens - retrieval_reserve)
+    if total <= effective_ceiling:
         return 0, 0
+    ceiling = effective_ceiling
 
     recent_buffer = 4
     anchor = 2
@@ -651,25 +658,12 @@ def create_app(config: Config) -> FastAPI:
         loop = asyncio.get_running_loop()
 
         if not passive:
-            # Retrieval pass: inject LTM into the payload before forwarding.
-            try:
-                conv = adapter.parse(payload)
-                with request_duration.labels(phase="retrieve").time():
-                    ltm_text = await _run_sync(
-                        loop, _retrieve_ltm_block, config, project_id, conv, payload
-                    )
-                if ltm_text:
-                    retriever_hits_total.labels(
-                        project=project_id, source="hybrid"
-                    ).inc()
-                adapter.inject_ltm(payload, ltm_text)
-            except Exception:
-                log.exception(
-                    "retriever failed project=%s; proceeding without LTM", project_id
-                )
+            # Order matters: rescue can ADD turns, eviction RESERVES space for
+            # retrieval, retrieval INJECTS within the reserve. Final payload
+            # always <= operational_ceiling_tokens (size-neutral contract).
 
-            # Detect compaction + rescue (Anthropic only), offloaded to executor.
-            # Rescue MUTATES the outbound payload, so it's gated by passive mode.
+            # 1) Rescue: re-attach assistant turns the CLI's compaction may have
+            # dropped. Mutates payload. Bounded by detect_compaction caps.
             rescue_ids: list[str] = []
             if provider == "anthropic":
                 rescued_list, rescue_ids = await _run_sync(
@@ -685,6 +679,42 @@ def create_app(config: Config) -> FastAPI:
                     ).inc(len(rescue_ids))
                     _enqueue_facets(app, project_id, rescue_ids, config)
                     facet_queue_depth.set(app.state.facet_queue.qsize())
+
+            # 2) Compute retrieval reserve so eviction leaves room for the LTM
+            # block we're about to inject. Default 5k absolute cap.
+            retrieval_reserve = _ltm_budget_for(config, payload)
+
+            # 3) Pre-forward eviction: trim middle to fit under
+            # (ceiling - retrieval_reserve). Archives evicted turns.
+            try:
+                n_pre, tok_pre = await _run_sync(
+                    loop, _evict_inbound_to_ceiling,
+                    config, project_id, payload, adapter, retrieval_reserve,
+                )
+                if n_pre > 0:
+                    log.info(
+                        "pre_forward_evict project=%s turns=%d tokens=%d reserve=%d",
+                        project_id, n_pre, tok_pre, retrieval_reserve,
+                    )
+            except Exception:
+                log.exception("pre-forward eviction failed project=%s", project_id)
+
+            # 4) LTM retrieval + injection. Block size <= retrieval_reserve.
+            try:
+                conv = adapter.parse(payload)
+                with request_duration.labels(phase="retrieve").time():
+                    ltm_text = await _run_sync(
+                        loop, _retrieve_ltm_block, config, project_id, conv, payload
+                    )
+                if ltm_text:
+                    retriever_hits_total.labels(
+                        project=project_id, source="hybrid"
+                    ).inc()
+                adapter.inject_ltm(payload, ltm_text)
+            except Exception:
+                log.exception(
+                    "retriever failed project=%s; proceeding without LTM", project_id
+                )
         else:
             rescue_ids = []
             # Still record seen_turns so future non-passive sessions have
@@ -701,23 +731,6 @@ def create_app(config: Config) -> FastAPI:
                         db.close()
                 except Exception:
                     log.exception("passive seen_turns record failed project=%s", project_id)
-
-        # Pre-forward eviction: keep outbound payload <= operational ceiling.
-        # Spillover should be size-NEUTRAL with respect to the upstream:
-        # Anthropic must never see a payload larger than what raw Claude Code
-        # would have generated. Inflation here = TPM cap breach = 429 storm.
-        if not passive:
-            try:
-                n_pre, tok_pre = await _run_sync(
-                    loop, _evict_inbound_to_ceiling, config, project_id, payload, adapter
-                )
-                if n_pre > 0:
-                    log.info(
-                        "pre_forward_evict project=%s turns=%d tokens=%d",
-                        project_id, n_pre, tok_pre,
-                    )
-            except Exception:
-                log.exception("pre-forward eviction failed project=%s", project_id)
 
         forwarded_body = json.dumps(payload).encode("utf-8")
         fwd_headers = {
