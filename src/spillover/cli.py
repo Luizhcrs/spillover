@@ -112,6 +112,107 @@ def query(project_id: str, text: str, topk: int | None):
         db.close()
 
 
+@main.group()
+def route():
+    """Toggle Claude Code routing through the spillover proxy.
+
+    Writes (or removes) `env.ANTHROPIC_BASE_URL` in `~/.claude/settings.json`.
+    This is the canonical (and only) way to make Claude Code's main process
+    use the proxy; SessionStart hooks cannot mutate the parent process env
+    (per official docs at https://code.claude.com/docs/en/hooks).
+    """
+
+
+def _settings_path() -> Path:
+    return Path.home() / ".claude" / "settings.json"
+
+
+_ROUTE_KEYS = (
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_AUTO_COMPACT",
+    "CLAUDE_CODE_DISABLE_COMPACT",
+    "CLAUDE_CODE_DISABLE_AUTO_COMPACT",
+    "DISABLE_AUTOCOMPACT",
+)
+
+
+def _load_settings() -> tuple[Path, dict]:
+    import json
+    p = _settings_path()
+    if p.exists():
+        try:
+            return p, json.loads(p.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return p, {}
+    return p, {}
+
+
+def _save_settings(path: Path, data: dict) -> None:
+    import json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    import os as _os
+    _os.replace(tmp, path)
+
+
+@route.command("on")
+@click.option("--port", default=None, type=int, help="Override SPILLOVER_PORT")
+def route_on(port: int | None):
+    """Point Claude Code at the local spillover proxy."""
+    import os
+    p = port if port is not None else int(os.environ.get("SPILLOVER_PORT", "8787"))
+    base_url = f"http://127.0.0.1:{p}"
+    path, data = _load_settings()
+    env = data.get("env") or {}
+    env["ANTHROPIC_BASE_URL"] = base_url
+    env["CLAUDE_CODE_AUTO_COMPACT"] = "0"
+    env["CLAUDE_CODE_DISABLE_COMPACT"] = "1"
+    env["CLAUDE_CODE_DISABLE_AUTO_COMPACT"] = "1"
+    env["DISABLE_AUTOCOMPACT"] = "true"
+    data["env"] = env
+    _save_settings(path, data)
+    click.echo(f"routed: Claude Code -> {base_url}")
+    click.echo("restart your `claude` sessions for it to take effect.")
+
+
+@route.command("off")
+def route_off():
+    """Restore Claude Code's direct connection to api.anthropic.com."""
+    path, data = _load_settings()
+    env = data.get("env") or {}
+    removed = []
+    for k in _ROUTE_KEYS:
+        if k in env:
+            del env[k]
+            removed.append(k)
+    if env:
+        data["env"] = env
+    else:
+        data.pop("env", None)
+    _save_settings(path, data)
+    if removed:
+        click.echo(f"removed: {', '.join(removed)}")
+    click.echo("Claude Code now talks directly to api.anthropic.com.")
+    click.echo("restart your `claude` sessions for it to take effect.")
+
+
+@route.command("status")
+def route_status():
+    """Show current Claude Code routing config."""
+    path, data = _load_settings()
+    env = data.get("env") or {}
+    base = env.get("ANTHROPIC_BASE_URL")
+    if base:
+        click.echo(f"routed -> {base}")
+    else:
+        click.echo("not routed (direct to api.anthropic.com)")
+    for k in _ROUTE_KEYS[1:]:
+        v = env.get(k)
+        if v is not None:
+            click.echo(f"  {k}={v}")
+
+
 @main.command()
 @click.option("--tasks", type=click.Path(exists=True, dir_okay=False), required=True)
 @click.option("--report", type=click.Path(dir_okay=False), default="bench-report.md")
