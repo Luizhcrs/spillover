@@ -114,6 +114,42 @@ def query(project_id: str, text: str, topk: int | None):
 
 
 @main.command()
+@click.option("--archive", default=None, type=float, help="Archive fraction of input (e.g. 0.2667 = 26.67%%).")
+@click.option("--retrieval", default=None, type=float, help="Retrieval fraction of remaining context (e.g. 0.1538 = 15.38%%).")
+def pct(archive: float | None, retrieval: float | None):
+    """Set archive% / retrieval% of every input (size-rule from the design)."""
+    if archive is None and retrieval is None:
+        click.echo("nothing to set. Pass --archive or --retrieval.")
+        return
+    config = Config.from_env()
+    state_file = config.db_root / "runtime.env"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    existing = {}
+    if state_file.exists():
+        for line in state_file.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                existing[k.strip()] = v.strip()
+    if archive is not None:
+        if not (0.0 <= archive < 0.9):
+            click.echo("--archive must be in [0.0, 0.9)", err=True)
+            raise SystemExit(2)
+        existing["SPILLOVER_ARCHIVE_PCT"] = str(archive)
+    if retrieval is not None:
+        if not (0.0 <= retrieval < 0.9):
+            click.echo("--retrieval must be in [0.0, 0.9)", err=True)
+            raise SystemExit(2)
+        existing["SPILLOVER_RETRIEVAL_PCT"] = str(retrieval)
+    state_file.write_text(
+        "\n".join(f"{k}={v}" for k, v in existing.items()) + "\n",
+        encoding="utf-8",
+    )
+    click.echo(f"archive_pct={existing.get('SPILLOVER_ARCHIVE_PCT','(unset)')}")
+    click.echo(f"retrieval_pct={existing.get('SPILLOVER_RETRIEVAL_PCT','(unset)')}")
+    click.echo("  takes effect on next request (proxy reads live).")
+
+
+@main.command()
 @click.argument("tokens", type=int)
 def ceiling(tokens: int):
     """Set the proxy's operational ceiling (max outbound tokens per request).
@@ -213,6 +249,7 @@ _ROUTE_KEYS = (
     "DISABLE_AUTO_COMPACT",           # canonical disable flag
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",  # set to 100 so compaction never trips
     # Legacy variants — keep cleaning them on `route off` for old installs:
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",   # turned out to not exist in CC; clean if present
     "CLAUDE_CODE_AUTO_COMPACT",
     "CLAUDE_CODE_DISABLE_COMPACT",
     "CLAUDE_CODE_DISABLE_AUTO_COMPACT",
@@ -259,7 +296,12 @@ def route_on(port: int | None, passive: bool):
     path, data = _load_settings()
     env = data.get("env") or {}
     env["ANTHROPIC_BASE_URL"] = base_url
-    # Canonical disable flags for current Claude Code (>=2.1.x):
+    # Canonical disable flags for current Claude Code (>=2.1.x).
+    # Note: CC's hard "Context limit reached" wall at the model's window
+    # size cannot be disabled by any env var. Spillover preserves all turns
+    # via the archive; users still hit the wall and need `/clear`, but the
+    # archive makes /clear painless (retrieval brings prior context back
+    # on the next session).
     env["DISABLE_AUTO_COMPACT"] = "1"
     env["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = "100"
     # Drop legacy variants if previously written (some users keep them around):
@@ -268,6 +310,7 @@ def route_on(port: int | None, passive: bool):
         "CLAUDE_CODE_DISABLE_COMPACT",
         "CLAUDE_CODE_DISABLE_AUTO_COMPACT",
         "DISABLE_AUTOCOMPACT",
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS",  # not a real CC var
     ):
         env.pop(legacy, None)
     if passive:

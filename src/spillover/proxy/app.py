@@ -105,23 +105,41 @@ def _stream_rewrite_enabled(config: Config) -> bool:
 
 
 def _ltm_budget_for(config: Config, payload: dict) -> int:
-    """LTM injection token budget for this request.
+    """Retrieval block budget = SPILLOVER_RETRIEVAL_PCT * remaining_context.
 
-    Hard absolute cap protects users whose provider TPM is small (e.g. OAuth
-    bearers on Pro/Team plans). Without the cap a default 200k ceiling x 0.15
-    LTM share = 30k tokens injected per request, which dwarfs most TPM tiers
-    and produces 429 cascades. Override via SPILLOVER_LTM_MAX_TOKENS.
+    Default 15.38% matches the user's design diagram. Computed against the
+    estimated remaining context (input - archived_target), so smaller inputs
+    get proportionally smaller retrieval blocks.
+
+    Hard absolute cap (SPILLOVER_LTM_MAX_TOKENS, default 20000) protects
+    against runaway sizes when input is huge.
     """
     import os
-    from spillover.budget.profile import select_profile
-
-    profile = select_profile(payload, config.profile_default)
-    pct_budget = int(config.operational_ceiling_tokens * profile.ltm_pct)
+    messages = payload.get("messages") or []
+    system = payload.get("system")
+    system_tokens = count_tokens(system) if system else 0
+    total = system_tokens + sum(count_tokens(m.get("content")) for m in messages)
     try:
-        absolute_cap = int(os.environ.get("SPILLOVER_LTM_MAX_TOKENS", "5000"))
+        archive_pct = float(os.environ.get("SPILLOVER_ARCHIVE_PCT", "0.2667"))
     except ValueError:
-        absolute_cap = 5000
-    return min(pct_budget, absolute_cap)
+        archive_pct = 0.2667
+    try:
+        retrieval_pct = float(os.environ.get("SPILLOVER_RETRIEVAL_PCT", "0.1538"))
+    except ValueError:
+        retrieval_pct = 0.1538
+    archive_pct = max(0.0, min(0.9, archive_pct))
+    retrieval_pct = max(0.0, min(0.9, retrieval_pct))
+    remaining_context = int(total * (1.0 - archive_pct))
+    pct_budget = int(remaining_context * retrieval_pct)
+    try:
+        absolute_cap = int(os.environ.get("SPILLOVER_LTM_MAX_TOKENS", "20000"))
+    except ValueError:
+        absolute_cap = 20000
+    try:
+        min_budget = int(os.environ.get("SPILLOVER_LTM_MIN_TOKENS", "500"))
+    except ValueError:
+        min_budget = 500
+    return max(min_budget, min(pct_budget, absolute_cap))
 
 
 def _retrieve_ltm_block(
@@ -338,10 +356,29 @@ def _evict_inbound_to_ceiling(
         ))
     except ValueError:
         live_ceiling = config.operational_ceiling_tokens
-    effective_ceiling = max(0, live_ceiling - retrieval_reserve)
-    if total <= effective_ceiling:
+
+    # Percentual de archive: SEMPRE corta essa fracao do input (default 26.67%)
+    # mesmo quando input ja esta abaixo do ceiling. Implementa a regra fixa
+    # do diagrama: input -> archive%(input) -> arquiva -> sobra (100-archive)%.
+    try:
+        archive_pct = float(_os.environ.get("SPILLOVER_ARCHIVE_PCT", "0.2667"))
+    except ValueError:
+        archive_pct = 0.2667
+    archive_pct = max(0.0, min(0.9, archive_pct))
+
+    # Tiny inputs (<5k tokens) don't carry useful old context to evict.
+    # Apply only the ceiling rule there.
+    try:
+        min_total_for_pct = int(_os.environ.get("SPILLOVER_PCT_MIN_TOTAL_TOKENS", "5000"))
+    except ValueError:
+        min_total_for_pct = 5000
+    pct_target_archive = int(total * archive_pct) if total >= min_total_for_pct else 0
+    ceiling_target_archive = max(0, total - (live_ceiling - retrieval_reserve))
+    # Target eviction tokens = max(pct rule, ceiling rule)
+    target_to_evict = max(pct_target_archive, ceiling_target_archive)
+    if target_to_evict <= 0:
         return 0, 0
-    ceiling = effective_ceiling
+    ceiling = max(0, total - target_to_evict)
 
     recent_buffer = 4
     anchor = 2
@@ -397,8 +434,6 @@ def _evict_inbound_to_ceiling(
                         content=msg.get("content"),
                         token_count=tok,
                         ts=ts,
-                        source_index=idx,
-                        memory_type=None,
                     ),
                 )
                 archived_ids.append(eid)
