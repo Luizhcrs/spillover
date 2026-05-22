@@ -517,46 +517,73 @@ def create_app(config: Config) -> FastAPI:
             retriever_hits_total,
         )
 
-        # Intercept only applies to Anthropic wire format (compact signal)
-        if provider == "anthropic" and should_intercept_request(payload):
+        # Passive mode (SPILLOVER_PASSIVE=1): proxy NEVER mutates the outbound
+        # request. No LTM injection, no rescue payload modification, no
+        # compaction interception. Upstream sees exactly what Claude Code
+        # would have sent direct, so the provider's quota / rate-limit
+        # behavior is identical to running without the proxy. The proxy
+        # still observes the conversation and archives evicted turns on the
+        # response path, so memory continues to accumulate.
+        import os as _os
+        passive = _os.environ.get("SPILLOVER_PASSIVE", "0") not in ("", "0", "false", "False")
+
+        if (not passive) and provider == "anthropic" and should_intercept_request(payload):
             log.info("intercept compact project=%s", project_id)
             return JSONResponse(make_intercept_response(payload), status_code=200)
 
         loop = asyncio.get_running_loop()
 
-        # Retrieval pass: inject LTM into the payload before forwarding.
-        try:
-            conv = adapter.parse(payload)
-            with request_duration.labels(phase="retrieve").time():
-                ltm_text = await _run_sync(
-                    loop, _retrieve_ltm_block, config, project_id, conv, payload
+        if not passive:
+            # Retrieval pass: inject LTM into the payload before forwarding.
+            try:
+                conv = adapter.parse(payload)
+                with request_duration.labels(phase="retrieve").time():
+                    ltm_text = await _run_sync(
+                        loop, _retrieve_ltm_block, config, project_id, conv, payload
+                    )
+                if ltm_text:
+                    retriever_hits_total.labels(
+                        project=project_id, source="hybrid"
+                    ).inc()
+                adapter.inject_ltm(payload, ltm_text)
+            except Exception:
+                log.exception(
+                    "retriever failed project=%s; proceeding without LTM", project_id
                 )
-            if ltm_text:
-                retriever_hits_total.labels(
-                    project=project_id, source="hybrid"
-                ).inc()
-            adapter.inject_ltm(payload, ltm_text)
-        except Exception:
-            log.exception(
-                "retriever failed project=%s; proceeding without LTM", project_id
-            )
 
-        # Detect compaction + rescue (Anthropic only), offloaded to executor
-        rescue_ids: list[str] = []
-        if provider == "anthropic":
-            rescued_list, rescue_ids = await _run_sync(
-                loop, _detect_and_rescue, config, project_id, payload.get("messages") or []
-            )
-            if rescued_list:
-                compaction_detected_total.labels(project=project_id).inc(
-                    len(rescued_list)
+            # Detect compaction + rescue (Anthropic only), offloaded to executor.
+            # Rescue MUTATES the outbound payload, so it's gated by passive mode.
+            rescue_ids: list[str] = []
+            if provider == "anthropic":
+                rescued_list, rescue_ids = await _run_sync(
+                    loop, _detect_and_rescue, config, project_id, payload.get("messages") or []
                 )
-            if rescue_ids:
-                episodes_archived_total.labels(
-                    project=project_id, type="rescued"
-                ).inc(len(rescue_ids))
-                _enqueue_facets(app, project_id, rescue_ids, config)
-                facet_queue_depth.set(app.state.facet_queue.qsize())
+                if rescued_list:
+                    compaction_detected_total.labels(project=project_id).inc(
+                        len(rescued_list)
+                    )
+                if rescue_ids:
+                    episodes_archived_total.labels(
+                        project=project_id, type="rescued"
+                    ).inc(len(rescue_ids))
+                    _enqueue_facets(app, project_id, rescue_ids, config)
+                    facet_queue_depth.set(app.state.facet_queue.qsize())
+        else:
+            rescue_ids = []
+            # Still record seen_turns so future non-passive sessions have
+            # something to compare against. This does NOT mutate the payload.
+            if provider == "anthropic":
+                try:
+                    from spillover.counter_compact.detection import record_seen_turns
+                    from spillover.storage.sqlite import open_project_db
+                    db = open_project_db(config.db_root, project_id)
+                    try:
+                        record_seen_turns(db, project_id, payload.get("messages") or [])
+                        db.commit()
+                    finally:
+                        db.close()
+                except Exception:
+                    log.exception("passive seen_turns record failed project=%s", project_id)
 
         forwarded_body = json.dumps(payload).encode("utf-8")
         fwd_headers = {

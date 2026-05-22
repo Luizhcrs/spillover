@@ -179,6 +179,7 @@ _ROUTE_KEYS = (
     "CLAUDE_CODE_DISABLE_COMPACT",
     "CLAUDE_CODE_DISABLE_AUTO_COMPACT",
     "DISABLE_AUTOCOMPACT",
+    "SPILLOVER_PASSIVE",
 )
 
 
@@ -204,7 +205,15 @@ def _save_settings(path: Path, data: dict) -> None:
 
 @route.command("on")
 @click.option("--port", default=None, type=int, help="Override SPILLOVER_PORT")
-def route_on(port: int | None):
+@click.option(
+    "--passive/--active", default=False,
+    help="Passive: proxy never mutates the outbound request (no LTM injection, "
+         "no rescue, no compact intercept). Anthropic sees the same payload "
+         "Claude Code would send direct, so rate-limit behavior is identical "
+         "to running without the proxy. Memory still accumulates from observed "
+         "responses. Default: active.",
+)
+def route_on(port: int | None, passive: bool):
     """Point Claude Code at the local spillover proxy."""
     import os
     p = port if port is not None else int(os.environ.get("SPILLOVER_PORT", "8787"))
@@ -216,9 +225,14 @@ def route_on(port: int | None):
     env["CLAUDE_CODE_DISABLE_COMPACT"] = "1"
     env["CLAUDE_CODE_DISABLE_AUTO_COMPACT"] = "1"
     env["DISABLE_AUTOCOMPACT"] = "true"
+    if passive:
+        env["SPILLOVER_PASSIVE"] = "1"
+    else:
+        env.pop("SPILLOVER_PASSIVE", None)
     data["env"] = env
     _save_settings(path, data)
-    click.echo(f"routed: Claude Code -> {base_url}")
+    mode = "PASSIVE (observe-only)" if passive else "ACTIVE (full memory pipeline)"
+    click.echo(f"routed: Claude Code -> {base_url}  [{mode}]")
     click.echo("restart your `claude` sessions for it to take effect.")
 
 
