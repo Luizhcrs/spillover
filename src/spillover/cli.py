@@ -112,6 +112,52 @@ def query(project_id: str, text: str, topk: int | None):
         db.close()
 
 
+@main.command()
+@click.argument("project_id")
+@click.option("--all", "purge_all", is_flag=True, default=False,
+              help="Delete EVERY episode for the project (not just rescued ones).")
+@click.option("--yes", is_flag=True, default=False, help="Skip confirmation.")
+def purge(project_id: str, purge_all: bool, yes: bool):
+    """Delete episodes from a project's archive.
+
+    Default removes only compaction_rescued=1 rows (false-positive rescues from
+    the legacy detect_compaction window). Use --all to wipe the whole archive.
+    """
+    project_id = _resolve_pid(project_id)
+    config = Config.from_env()
+    path = project_db_path(config.db_root, project_id)
+    if not path.exists():
+        click.echo(f"project {project_id}: no archive found")
+        return
+    if not yes:
+        scope = "ALL episodes" if purge_all else "rescued episodes only"
+        click.confirm(f"Delete {scope} for project {project_id}?", abort=True)
+    db = open_project_db(config.db_root, project_id)
+    try:
+        if purge_all:
+            n = db.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+            db.execute("DELETE FROM episodes")
+            db.execute("DELETE FROM vec_episodes")
+            db.execute("DELETE FROM seen_turns")
+            db.commit()
+            click.echo(f"deleted {n} episodes + reset seen_turns")
+        else:
+            n = db.execute(
+                "SELECT COUNT(*) FROM episodes WHERE compaction_rescued=1"
+            ).fetchone()[0]
+            db.execute(
+                "DELETE FROM vec_episodes WHERE episode_id IN ("
+                "SELECT id FROM episodes WHERE compaction_rescued=1"
+                ")"
+            )
+            db.execute("DELETE FROM episodes WHERE compaction_rescued=1")
+            db.execute("DELETE FROM seen_turns")
+            db.commit()
+            click.echo(f"deleted {n} rescued episodes + reset seen_turns")
+    finally:
+        db.close()
+
+
 @main.group()
 def route():
     """Toggle Claude Code routing through the spillover proxy.

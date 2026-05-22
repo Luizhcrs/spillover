@@ -105,10 +105,23 @@ def _stream_rewrite_enabled(config: Config) -> bool:
 
 
 def _ltm_budget_for(config: Config, payload: dict) -> int:
+    """LTM injection token budget for this request.
+
+    Hard absolute cap protects users whose provider TPM is small (e.g. OAuth
+    bearers on Pro/Team plans). Without the cap a default 200k ceiling x 0.15
+    LTM share = 30k tokens injected per request, which dwarfs most TPM tiers
+    and produces 429 cascades. Override via SPILLOVER_LTM_MAX_TOKENS.
+    """
+    import os
     from spillover.budget.profile import select_profile
 
     profile = select_profile(payload, config.profile_default)
-    return int(config.operational_ceiling_tokens * profile.ltm_pct)
+    pct_budget = int(config.operational_ceiling_tokens * profile.ltm_pct)
+    try:
+        absolute_cap = int(os.environ.get("SPILLOVER_LTM_MAX_TOKENS", "5000"))
+    except ValueError:
+        absolute_cap = 5000
+    return min(pct_budget, absolute_cap)
 
 
 def _retrieve_ltm_block(

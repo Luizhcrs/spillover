@@ -77,12 +77,20 @@ def detect_compaction(
     db: sqlite3.Connection,
     project_id: str,
     messages: list[dict],
+    window_seconds: int = 600,
+    max_rescue: int = 20,
 ) -> list[RescuedTurn]:
-    """Compare the current inbound messages against seen_turns.
+    """Compare current inbound messages against RECENTLY-seen turns.
 
-    Returns the list of assistant turns the proxy previously witnessed that
-    have now disappeared from the conversation, ordered by their original
-    turn_index.
+    Only rescue turns the proxy witnessed in the last `window_seconds` AND
+    that are now missing from the current message list. This avoids
+    rescuing the entire historical seen_turns backlog (which accumulates
+    across sessions for a per-cwd project_id) every time a new session
+    starts fresh -- the previous behavior surfaced ~2700 false-positive
+    "rescues" per request on long-lived projects.
+
+    Hard cap `max_rescue` so that a single false-positive cluster can't
+    inflate the payload by orders of magnitude.
     """
     current_hashes: set[str] = set()
     for msg in messages:
@@ -90,19 +98,20 @@ def detect_compaction(
             continue
         current_hashes.add(_hash_assistant_message(msg))
 
+    cutoff_ms = int(time.time() * 1000) - window_seconds * 1000
     rows = db.execute(
         "SELECT turn_hash, turn_index, content_json FROM seen_turns "
-        "WHERE project_id=? ORDER BY turn_index ASC",
-        (project_id,),
+        "WHERE project_id=? AND last_seen_ts >= ? "
+        "ORDER BY turn_index ASC LIMIT ?",
+        (project_id, cutoff_ms, max_rescue),
     ).fetchall()
 
     rescued: list[RescuedTurn] = []
     for row in rows:
         if row["turn_hash"] in current_hashes:
             continue
-        # This previously-seen turn is missing -> compaction suspected.
+        # Previously-seen turn (within window) is missing -> compaction suspected.
         content = json.loads(row["content_json"])
-        # crude token count: char/4 like the heuristic tokenizer
         from spillover.eviction.tokenizer import count_tokens
 
         rescued.append(
@@ -116,9 +125,10 @@ def detect_compaction(
 
     if rescued:
         log.warning(
-            "compaction_detected project=%s rescued_count=%d",
+            "compaction_detected project=%s rescued_count=%d window_seconds=%d",
             project_id,
             len(rescued),
+            window_seconds,
         )
 
     return rescued
